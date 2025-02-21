@@ -1,0 +1,30 @@
+---
+title: "Proyecto"
+author: "Isabelle"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r valencia}
+val_list = read.csv("valencia_listings.csv", sep=',')
+val_rev = read.csv("valencia_reviews.csv", sep=',')
+head(val_list, 3)
+head(val_rev, 3)
+```
+
+```{r merge}
+library(dplyr)
+colnames(val_list)[colnames(val_list) == "id"] <- "listing_id"
+head(val_list, 3)
+unido = merge(val_list, val_rev, by = "listing_id", all.x = TRUE)
+head(merged, 3)
+```
+```{r}
+unido[unido$listing_id == "276455",]
+```
+
