@@ -27,4 +27,13 @@ head(merged, 3)
 ```{r}
 unido[unido$listing_id == "276455",]
 ```
+```{r}
+write.csv(unido, "valencia_unido.csv")
+```
+
+```{r}
+unido2 <- unido %>%
+ group_by("listing_id")
+head(unido2, 3)
+```
 
