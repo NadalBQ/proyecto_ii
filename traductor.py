@@ -1,6 +1,7 @@
 
 from deep_translator import GoogleTranslator
 import pandas as pd
+import langid as lid
 
 
 def get_file_text(address:str) -> str:
@@ -21,16 +22,23 @@ def traducir_texto(texto):
     # return texto_traducido
 
 
+def is_english(text: str) -> bool:
+    return lid.classify(text) == "en"
 
-def traducir(csv_address = "valencia_reviews.csv", nombre_columna = "comments", destino = "en_reviews.txt"):
+
+def traducir(csv_address = "valencia_reviews.csv", nombre_columna = "comments", destino = "en_reviews.txt", i = 0, amount = 300):
     csv = pd.read_csv(csv_address)
     comentarios = []
     serie_comentarios = csv[nombre_columna]
-    i = 0
+    com = i
+    top = i + amount
     for comentario in serie_comentarios:
         i += 1
         comentario = str(comentario)
-        comment = traducir_texto(comentario)
+        if is_english(comentario):
+            pass
+        else:
+            comentario = traducir_texto(comentario)
         print(i)
         errores = []
         with open(destino, "a", encoding="utf-8") as doc:
@@ -38,8 +46,8 @@ def traducir(csv_address = "valencia_reviews.csv", nombre_columna = "comments", 
                 doc.write(comentario + "\n")
             except:
                 errores.append(i)
-        # if i == 100:
-            # break
-    return "hecho", "\n" + "errores: ", errores
+        if i == top:
+            break
+    return "Hecho", "\n" + "errores: ", errores, "comienzo:", com, "fin:", i
 
-print(traducir())
+print(traducir(i=0, amount=300))
