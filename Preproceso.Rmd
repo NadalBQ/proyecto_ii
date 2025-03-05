@@ -40,7 +40,7 @@ head(unido_limpiado, 3)
 
 ```{r tabla variables}
 descVal = data.frame("variable" = colnames(unido_limpiado),
-                      "tipo" = c("categorical", rep("text", 3), "categorical", rep("text", 7), "binary", "text", rep("numerical", 2), "text", rep("binary", 2), rep("text", 3), rep("numerical", 2), "text",  stringsAsFactors = FALSE)
+                      "tipo" = c("categorical", rep("text", 3), "categorical", rep("text", 7), "binary", "text", rep("numerical", 2), "text", rep("binary", 2), rep("text", 3), rep("numerical", 2), "text", rep("numerical", 3), rep("text", 2), rep("numerical", 2), "binary", rep("numerical", 3), rep("text", 2), rep("numerical", 7), "text", "binary", "numerical", "categorical", "text"),  stringsAsFactors = FALSE)
 rownames(descVal) = descVal$variable
 descVal
 ```
