@@ -32,7 +32,8 @@ def traducir(csv_address = "valencia_reviews.csv", nombre_columna = "comments", 
     serie_comentarios = csv[nombre_columna]
     com = i
     top = i + amount
-    for comentario in serie_comentarios:
+    while i < len(serie_comentarios):
+        comentario = serie_comentarios[i]
         i += 1
         comentario = str(comentario)
         if is_english(comentario):
@@ -48,6 +49,6 @@ def traducir(csv_address = "valencia_reviews.csv", nombre_columna = "comments", 
                 errores.append(i)
         if i == top:
             break
-    return "Hecho", "\n" + "errores: ", errores, "comienzo:", com, "fin:", i
+    return "Hecho\n", "errores: ", errores, "comienzo:", com, "fin:", i
 
 print(traducir(i=0, amount=300))
