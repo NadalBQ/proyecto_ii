@@ -5,6 +5,8 @@ import pandas as pd
 import langid as lid
 import time
 
+
+
 def get_file_text(address: str) -> str:
     with open(address, "r", encoding="utf-8") as text:
         csv_text = text.read()
@@ -15,12 +17,6 @@ def traducir_texto(texto: str, source_lang: str = "auto", target_lang: str = "en
     traductor = GoogleTranslator(source=source_lang, target=target_lang)
     traduccion = traductor.translate(texto)
     return traduccion
-    # for i in range(0, len(texto), max_chars):
-        # parte = texto[i : i + max_chars]
-        # traduccion = traductor.translate(parte)
-        # traducciones.append(traduccion)
-    # texto_traducido = " ".join(traducciones)
-    # return texto_traducido
 
 
 def is_english(text: str) -> bool:
@@ -66,7 +62,7 @@ def traducir(
         
         with open(destino, "a", encoding="utf-8") as doc:
             try:
-                doc.write(comentario + "¿" + str(spanish) + "\n")
+                doc.write(comentario + "¿" + str(spanish) + "¿" + str(i) + "\n")
             except:
                 errores.append(i)
         if i == top:
