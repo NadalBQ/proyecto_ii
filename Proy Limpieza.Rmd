@@ -24,32 +24,27 @@ head(val_rev, 3)
 # quitar las variables que no vamos a usar
 
 list_limpiado = subset(val_list, select = -c(listing_url, scrape_id, last_scraped, source, picture_url, host_url, host_thumbnail_url, host_picture_url, minimum_minimum_nights, maximum_minimum_nights, minimum_maximum_nights, maximum_maximum_nights, minimum_nights_avg_ntm, maximum_nights_avg_ntm, calendar_updated, availability_30, availability_60, availability_90, calendar_last_scraped, number_of_reviews_l30d, calculated_host_listings_count, room_type, bathrooms_text, beds, calculated_host_listings_count, calculated_host_listings_count_entire_homes, calculated_host_listings_count_private_rooms, calculated_host_listings_count_shared_rooms))
-
-
 head(list_limpiado, 3)
-
-# Crear una nueva columna para el precio sin el símbolo $
-list_limpiado$dollarPrice <- as.numeric(gsub("\\$", "", list_limpiado$price))
 ```
 
 ## Seleccionamos los pisos enteros
 
 ```{r list pisos}
 
-table(list_limpiado$property_type)  # ver las opciones del tipo de piso
+table(list_limpiado$property_type)  #ver las opciones del tipo de piso
 
-list_limpiado_pisos = list_limpiado[grepl("entire", list_limpiado$property_type, ignore.case = TRUE), ]  # Nos quedamos con los pisos enteros
+list_limpiado_pisos = list_limpiado[grepl("entire", list_limpiado$property_type, ignore.case = TRUE), ]  #quedamos con los pisos enteros
 head(list_limpiado_pisos)
 ```
 
-## Tabla descripción de las variables
+## Tabla descripcion de las variables
 
 ```{r tabla descripcion}
 
 #creamos una tabla de las variables y su tipo
 
 descValList = data.frame("variable" = colnames(list_limpiado_pisos),
-                      "tipo" = c("text", rep("text", 4), rep("text", 7), "binary", "text", rep("numerical", 2), "text", rep("binary", 2), rep("text", 3), rep("numerical", 2), "text", rep("numerical", 3), rep("text", 2), rep("numerical", 2), "binary", rep("numerical", 3), rep("text", 2), rep("numerical", 7), "text", "binary",rep("numerical", 2)),  stringsAsFactors = FALSE)
+                      "tipo" = c("text", rep("text", 4), rep("text", 7), "binary", "text", rep("numerical", 2), "text", rep("binary", 2), rep("text", 3), rep("numerical", 2), "text", rep("numerical", 3), rep("text", 2), rep("numerical", 2), "binary", rep("numerical", 3), rep("text", 2), rep("numerical", 7), "text", "binary", "numerical"),  stringsAsFactors = FALSE)
 rownames(descValList) = descValList$variable
 descValList
 ```
@@ -58,7 +53,7 @@ descValList
 
 ```{r variables numericas}
 
-# vemos la distribucion de las variables numericas
+#vemos la distribucion de las variables numericas
 
 numer = descValList$variable[descValList$tipo == "numerical"]
 summary(list_limpiado_pisos[,numer])
@@ -137,13 +132,9 @@ list_limpiado_pisos %>%
 ```
 
 ```{r}
-# quitamos las viviendas que no tienen valores del barrio
+#quitamos las viviendas que no tienen valores del barrio
 list_limpiado_pisos2 <- list_limpiado_pisos %>%
   filter(!(is.na(neighborhood_overview) & is.na(host_about)))
-
-# quitamos los pisos que no tienen valores en el precio
-list_limpiado_pisos2 <- list_limpiado_pisos %>%
-  filter(!(is.na(Price)))
 ```
 
 ```{r}
@@ -151,38 +142,6 @@ numNA = apply(list_limpiado_pisos2, 2, function(x) sum(is.na(x)))
 percNA = round(100*apply(list_limpiado_pisos2, 2, function(x) mean(is.na(x))), 2)
 tablaNA = data.frame("Variable" = colnames(list_limpiado_pisos2), numNA, percNA)
 tablaNA
-```
-
-# Valores anómalos 
-
-```{r anómalos}
-
-library(FactoMineR)
-library(factoextra)
-res.pca = PCA(list_limpiado_pisos2, scale.unit = TRUE, graph = FALSE, ncp = 10, 
-              quali.sup = which(descValList$tipo == "categorical"),
-              quanti.sup = 45)
-eig.val <- get_eigenvalue(res.pca)
-VPmedio = 100 * (1/nrow(eig.val))
-fviz_eig(res.pca, addlabels = TRUE) +
-  geom_hline(yintercept=VPmedio, linetype=2, color="red")
-kable(eig.val[1:6,])
-K = 3
-res.pca = PCA(list_limpiado_pisos2, scale.unit = TRUE, graph = FALSE, ncp = K, 
-              quali.sup = which(descValList$tipo == "categorical"),
-              quanti.sup = 45)
-
-misScores = res.pca$ind$coord[,1:K]
-miT2 = colSums(t(misScores**2)/eig.val[1:K,1])
-I = nrow(list_limpiado_pisos2)
-F95 = K*(I**2 - 1)/(I*(I - K)) * qf(0.95, K, I-K)
-F99 = K*(I**2 - 1)/(I*(I - K)) * qf(0.99, K, I-K)
-
-plot(1:length(miT2), miT2, type = "p", xlab = "Cereales", ylab = "T2")
-abline(h = F95, col = "orange", lty = 2, lwd = 2)
-abline(h = F99, col = "red3", lty = 2, lwd = 2)
-anomalas = which(miT2 > F95)
-anomalas
 ```
 
 
