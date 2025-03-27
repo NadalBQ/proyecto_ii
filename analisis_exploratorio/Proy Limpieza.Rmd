@@ -144,6 +144,54 @@ tablaNA = data.frame("Variable" = colnames(list_limpiado_pisos2), numNA, percNA)
 tablaNA
 ```
 
+# Variabilidad de las variables numéricas (desviación típica)
+```{r variabilidad}
+mySD = apply(list_limpiado_pisos2[,descValList$variable[descValList$tipo == "numerical"]], 2, sd, na.rm=TRUE)   #Calculamos la desviación típica (SD) 
+mySD
+```
+
+# Mejor calcular el coeficiente de variación porque no depende de las unidades o magnitud de las variables
+```{r coeficiente de variacion}
+myMU = colMeans(list_limpiado_pisos2[,descValList$variable[descValList$tipo == "numerical"]], na.rm=TRUE)
+myMU#La media
+myCV = mySD/myMU  #Obtenemos el coeficiente de variación (que al dividir por la media eliminamos las magnitudes)
+sort(myCV)  #Mostramos ordenando por coeficiente de variación
+```
+
+##binarias
+```{r binarias}
+apply(list_limpiado_pisos2[,descValList$variable[descValList$tipo == "binary"]], 2, table, useNA = "i")
+```
+
+##pca
+```{r}
+library(FactoMineR)
+library(factoextra)
+res.pca = PCA(list_limpiado_pisos2, scale.unit = TRUE, graph = FALSE, ncp = 4, quali.sup = which(descValList$tipo %in% c('text', 'binary')))
+eig.val <- get_eigenvalue(res.pca)
+VPmedio = 100 * (1/nrow(eig.val))
+fviz_eig(res.pca, addlabels = TRUE) +
+  geom_hline(yintercept=VPmedio, linetype=2, color="red")
+K = 4
+```
+```{r}
+res.pca$var$contrib
+fviz_contrib(res.pca, choice = "var", axes = 1) # PC1
+fviz_contrib(res.pca, choice = "var", axes = 2) # PC2
+fviz_contrib(res.pca, choice = "var", axes = 3) # PC3
+fviz_contrib(res.pca, choice = "var", axes = 4) # PC4
+```
+```{r}
+misScores = res.pca$ind$coord[,1:K]
+miT2 = colSums(t(misScores**2)/eig.val[1:K,1])
+I = nrow(list_limpiado_pisos2)
+F95 = K*(I**2 - 1)/(I*(I - K)) * qf(0.95, K, I-K)
+F99 = K*(I**2 - 1)/(I*(I - K)) * qf(0.99, K, I-K)
+
+plot(1:length(miT2), miT2, type = "p", xlab = "Datos", ylab = "T2")
+abline(h = F95, col = "orange", lty = 2, lwd = 2)
+abline(h = F99, col = "red3", lty = 2, lwd = 2)
+```
 
 # Unir las reseñas con las viviendas
 
