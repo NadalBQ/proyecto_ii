@@ -24,6 +24,11 @@ head(val_rev, 3)
 # quitar las variables que no vamos a usar
 
 list_limpiado = subset(val_list, select = -c(listing_url, scrape_id, last_scraped, source, picture_url, host_url, host_thumbnail_url, host_picture_url, minimum_minimum_nights, maximum_minimum_nights, minimum_maximum_nights, maximum_maximum_nights, minimum_nights_avg_ntm, maximum_nights_avg_ntm, calendar_updated, availability_30, availability_60, availability_90, calendar_last_scraped, number_of_reviews_l30d, calculated_host_listings_count, room_type, bathrooms_text, beds, calculated_host_listings_count, calculated_host_listings_count_entire_homes, calculated_host_listings_count_private_rooms, calculated_host_listings_count_shared_rooms))
+
+
+# Crear una nueva columna para el precio sin el símbolo $
+list_limpiado$price <- as.numeric(gsub("\\$", "", list_limpiado$price))
+
 head(list_limpiado, 3)
 ```
 
@@ -164,7 +169,7 @@ apply(list_limpiado_pisos2[,descValList$variable[descValList$tipo == "binary"]],
 ```
 
 ##pca
-```{r}
+```{r pca}
 library(FactoMineR)
 library(factoextra)
 res.pca = PCA(list_limpiado_pisos2, scale.unit = TRUE, graph = FALSE, ncp = 4, quali.sup = which(descValList$tipo %in% c('text', 'binary')))
@@ -174,14 +179,14 @@ fviz_eig(res.pca, addlabels = TRUE) +
   geom_hline(yintercept=VPmedio, linetype=2, color="red")
 K = 4
 ```
-```{r}
+```{r pca dimensiones}
 res.pca$var$contrib
 fviz_contrib(res.pca, choice = "var", axes = 1) # PC1
 fviz_contrib(res.pca, choice = "var", axes = 2) # PC2
 fviz_contrib(res.pca, choice = "var", axes = 3) # PC3
 fviz_contrib(res.pca, choice = "var", axes = 4) # PC4
 ```
-```{r}
+```{r t de hotelling}
 misScores = res.pca$ind$coord[,1:K]
 miT2 = colSums(t(misScores**2)/eig.val[1:K,1])
 I = nrow(list_limpiado_pisos2)
@@ -193,17 +198,26 @@ abline(h = F95, col = "orange", lty = 2, lwd = 2)
 abline(h = F99, col = "red3", lty = 2, lwd = 2)
 ```
 
+```{r anomalas}
+anomalas = which(miT2 > F95)
+anomalas
+```
+
+
+```{r quitar anomalas}
+list_limpiado_pisos_sin_anom <- list_limpiado_pisos2[-anomalas, ]
+```
+
 # Unir las reseñas con las viviendas
 
 ```{r unir}
-#library(dplyr)
-#colnames(list_limpiado_pisos2)[colnames(list_limpiado_pisos2) == "id"] <- "listing_id"
-#head(list_limpiado_pisos2, 3)
-#unido = merge(list_limpiado_pisos2, val_rev, by = "listing_id", all.x = TRUE)
-#head(unido, 3)
+library(dplyr)
+colnames(list_limpiado_pisos_sin_anom)[colnames(list_limpiado_pisos_sin_anom) == "id"] <- "listing_id"
+head(list_limpiado_pisos_sin_anom, 3)
+unido = merge(list_limpiado_pisos_sin_anom, val_rev, by = "listing_id", all.x = TRUE)
+head(unido, 3)
 ```
 
 ```{r csv}
-
-#write.csv(unido, "valencia_unido.csv")
+write.csv(unido, "valencia_unido.csv")
 ```
