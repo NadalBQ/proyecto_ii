@@ -1,0 +1,111 @@
+```{r}
+library(dplyr);
+library(knitr);
+library(lubridate);
+library(stats);
+library(FactoMineR);
+library(factoextra);
+library(amap);
+library(mdatools);
+library(grid)
+library(gridExtra)
+print('Paquetes importados')
+```
+#Lectura y limpieza de datos
+```{r lectura de datos}
+install.packages('readxl')
+library(readxl)
+INE = read_excel('INE.xlsx')
+INE_limpio = INE[,1:41]
+numNA = apply(INE_limpio, 2, function(x) sum(is.na(x)))
+numNA
+tablaNA = data.frame("Variable" = colnames(INE_limpio), numNA)
+tablaNA
+INE_limpio <- na.omit(INE_limpio)
+```
+###tipos de variables
+```{r}
+descdat = data.frame("variable" = colnames(INE_limpio),
+                     "tipo" = c('categorical', rep('numerical', 40)), stringsAsFactors = FALSE)
+rownames(descdat) = descdat$variable
+descdat
+```
+#Arreglo de variables
+```{r}
+str(INE_limpio[, descdat$variable[descdat$tipo == "numerical"]])
+INE_limpio[, descdat$variable[descdat$tipo == "numerical"]] <- 
+  lapply(INE_limpio[, descdat$variable[descdat$tipo == "numerical"]], function(x) as.numeric(as.character(x)))
+```
+#summary
+```{r}
+summary(INE_limpio[,descdat$variable[descdat$tipo == "numerical"]])
+INE_limpio = na.omit(INE_limpio)
+```
+
+# Variabilidad de las variables numéricas (desviación típica)
+```{r}
+mySD = apply(INE_limpio[,descdat$variable[descdat$tipo == "numerical"]], 2, sd, na.rm=TRUE)   #Calculamos la desviación típica (SD) 
+mySD
+```
+
+# Mejor calcular el coeficiente de variación porque no depende de las unidades o magnitud de las variables
+```{r}
+myMU = colMeans(INE_limpio[,descdat$variable[descdat$tipo == "numerical"]], na.rm=TRUE)
+myMU#La media
+myCV = mySD/myMU  #Obtenemos el coeficiente de variación (que al dividir por la media eliminamos las magnitudes)
+sort(myCV)  #Mostramos ordenando por coeficiente de variación
+```
+
+
+## Valores atípicos
+```{r}
+
+for (fila in descdat$variable[descdat$tipo=="numerical"]) {
+  par(mar = c(9,4,2,2))
+  boxplot(INE_limpio[,fila],xlab=fila,las = 2)   # mfcol
+}
+```
+
+```{r}
+for (fila in descdat$variable[descdat$tipo=="numerical"]) {
+par(mar = c(9,4,2,2))
+
+boxplot(log1p(INE_limpio[,fila]),xlab=fila,las = 2)   # mfcol
+}
+```
+
+```{r}
+INE_limpio[, 2:ncol(INE_limpio)] <- log(INE_limpio[, 2:ncol(INE_limpio)])
+
+```
+
+
+```{r}
+res.pca = PCA(INE_limpio, scale.unit = TRUE, graph = FALSE, ncp = 4, 
+              quali.sup = c(1))
+eig.val <- get_eigenvalue(res.pca)
+VPmedio = 100 * (1/nrow(eig.val))
+fviz_eig(res.pca, addlabels = TRUE) +
+  geom_hline(yintercept=VPmedio, linetype=2, color="red")
+kable(eig.val[1:16,])
+K = 4
+```
+
+```{r}
+res.pca$var$contrib
+fviz_contrib(res.pca, choice = "var", axes = 1) # PC1
+fviz_contrib(res.pca, choice = "var", axes = 2) # PC2
+```
+
+##T hotelling
+```{r}
+misScores = res.pca$ind$coord[,1:K]
+miT2 = colSums(t(misScores**2)/eig.val[1:K,1])
+I = nrow(INE_limpio)
+F95 = K*(I**2 - 1)/(I*(I - K)) * qf(0.95, K, I-K)
+F99 = K*(I**2 - 1)/(I*(I - K)) * qf(0.99, K, I-K)
+
+plot(1:length(miT2), miT2, type = "p", xlab = "Datos", ylab = "T2")
+abline(h = F95, col = "orange", lty = 2, lwd = 2)
+abline(h = F99, col = "red3", lty = 2, lwd = 2)
+```

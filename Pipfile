@@ -6,6 +6,8 @@ name = "pypi"
 [packages]
 deep-translator = "*"
 pandas = "*"
+langid = "*"
+matplotlib = "*"
 
 [dev-packages]
 
