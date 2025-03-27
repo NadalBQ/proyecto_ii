@@ -24,9 +24,11 @@ head(val_rev, 3)
 # quitar las variables que no vamos a usar
 
 list_limpiado = subset(val_list, select = -c(listing_url, scrape_id, last_scraped, source, picture_url, host_url, host_thumbnail_url, host_picture_url, minimum_minimum_nights, maximum_minimum_nights, minimum_maximum_nights, maximum_maximum_nights, minimum_nights_avg_ntm, maximum_nights_avg_ntm, calendar_updated, availability_30, availability_60, availability_90, calendar_last_scraped, number_of_reviews_l30d, calculated_host_listings_count, room_type, bathrooms_text, beds, calculated_host_listings_count, calculated_host_listings_count_entire_homes, calculated_host_listings_count_private_rooms, calculated_host_listings_count_shared_rooms))
+
+
 head(list_limpiado, 3)
 
-# crear una nueva columna para el precio sin el símbolo 
+# Crear una nueva columna para el precio sin el símbolo $
 list_limpiado$dollarPrice <- as.numeric(gsub("\\$", "", list_limpiado$price))
 ```
 
@@ -141,7 +143,7 @@ list_limpiado_pisos2 <- list_limpiado_pisos %>%
 
 # quitamos los pisos que no tienen valores en el precio
 list_limpiado_pisos2 <- list_limpiado_pisos %>%
-  filter(!(is.na(dollarPrice)))
+  filter(!(is.na(Price)))
 ```
 
 ```{r}
