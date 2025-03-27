@@ -1,0 +1,206 @@
+---
+title: "Proyecto II"
+author: "Isabelle"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Mirar listings.csv y reviews.csv
+
+```{r list+rev}
+val_list = read.csv("valencia_listings.csv", sep=',')
+val_rev = read.csv("valencia_reviews.csv", sep=',')
+head(val_list, 3)
+head(val_rev, 3)
+```
+
+# Limpiar listings.csv
+
+```{r limpiar list}
+# quitar las variables que no vamos a usar
+
+list_limpiado = subset(val_list, select = -c(listing_url, scrape_id, last_scraped, source, picture_url, host_url, host_thumbnail_url, host_picture_url, minimum_minimum_nights, maximum_minimum_nights, minimum_maximum_nights, maximum_maximum_nights, minimum_nights_avg_ntm, maximum_nights_avg_ntm, calendar_updated, availability_30, availability_60, availability_90, calendar_last_scraped, number_of_reviews_l30d, calculated_host_listings_count, room_type, bathrooms_text, beds, calculated_host_listings_count, calculated_host_listings_count_entire_homes, calculated_host_listings_count_private_rooms, calculated_host_listings_count_shared_rooms))
+head(list_limpiado, 3)
+
+# Crear una nueva columna para el precio sin el símbolo $
+list_limpiado$dollarPrice <- as.numeric(gsub("\\$", "", list_limpiado$price))
+```
+
+## Seleccionamos los pisos enteros
+
+```{r list pisos}
+
+table(list_limpiado$property_type)  #ver las opciones del tipo de piso
+
+list_limpiado_pisos = list_limpiado[grepl("entire", list_limpiado$property_type, ignore.case = TRUE), ]  #quedamos con los pisos enteros
+head(list_limpiado_pisos)
+```
+
+## Tabla descripcion de las variables
+
+
+```{r tabla descripcion}
+
+#creamos una tabla de las variables y su tipo
+
+descValList = data.frame("variable" = colnames(list_limpiado_pisos),
+                      "tipo" = c("text", rep("text", 4), rep("text", 7), "binary", "text", rep("numerical", 2), "text", rep("binary", 2), rep("text", 3), rep("numerical", 2), "text", rep("numerical", 3), rep("text", 2), rep("numerical", 2), "binary", rep("numerical", 3), rep("text", 2), rep("numerical", 7), "text", "binary",rep("numerical", 2)),  stringsAsFactors = FALSE)
+rownames(descValList) = descValList$variable
+descValList
+```
+
+#Analisis de las variables 
+
+```{r variables numericas}
+
+#vemos la distribucion de las variables numericas
+
+numer = descValList$variable[descValList$tipo == "numerical"]
+summary(list_limpiado_pisos[,numer])
+```
+
+```{r variables binarias}
+
+#vemos la distribucion de las variables binarias
+
+apply(list_limpiado_pisos[,descValList$variable[descValList$tipo == "binary"]], 2, table, useNA = "i")
+```
+
+```{r variables texto}
+
+list_limpiado_pisos[list_limpiado_pisos == ""] = NA
+list_limpiado_pisos[list_limpiado_pisos == "NULL"] = NA
+
+valores_faltantes <- colSums(is.na(list_limpiado_pisos[, descValList$tipo == "text"]))
+valores_faltantes
+```
+
+## Eliminamos las variables 
+
+```{r eliminar variables} 
+
+#quitamos las variables:
+
+list_limpiado_pisos = list_limpiado_pisos[,setdiff(colnames(list_limpiado_pisos), c("has_availability", "property_type", "neighbourhood", "host_neighbourhood"))]
+descValList = descValList[colnames(list_limpiado_pisos),]
+```
+
+# Valores faltantes o inconsistentes
+
+```{r NAs, echo = TRUE}
+numNA = apply(list_limpiado_pisos, 2, function(x) sum(is.na(x)))
+percNA = round(100*apply(list_limpiado_pisos, 2, function(x) mean(is.na(x))), 2)
+tablaNA = data.frame("Variable" = colnames(list_limpiado_pisos), numNA, percNA)
+tablaNA
+```
+
+
+```{r valores faltantes}
+library(Hmisc)
+
+# baños --> imputar con la mediana (1)
+list_limpiado_pisos$bathrooms = impute(list_limpiado_pisos$bathrooms, fun = median)
+
+# habitaciones --> imputar con la mediana (1)
+list_limpiado_pisos$bedrooms <- impute(list_limpiado_pisos$bedrooms, fun = median)
+
+#quitamos las viviendas que no tienen valores de las reseñas
+list_limpiado_pisos <- list_limpiado_pisos[!is.na(list_limpiado_pisos$review_scores_rating), ]
+
+#quitamos las viviendas que no tienen valores del precio
+list_limpiado_pisos <- list_limpiado_pisos[!is.na(list_limpiado_pisos$price), ]
+
+```
+
+```{r NAs depues, echo = TRUE}
+numNA = apply(list_limpiado_pisos, 2, function(x) sum(is.na(x)))
+percNA = round(100*apply(list_limpiado_pisos, 2, function(x) mean(is.na(x))), 2)
+tablaNA = data.frame("Variable" = colnames(list_limpiado_pisos), numNA, percNA)
+tablaNA
+```
+
+```{r}
+
+library(dplyr)
+
+list_limpiado_pisos %>%
+  group_by(neighbourhood_cleansed) %>%
+  summarise(
+    total_rows = n(),
+    missing_neighborhood_overview = sum(is.na(neighborhood_overview))) %>%
+  arrange(desc(missing_neighborhood_overview))
+```
+
+```{r}
+#quitamos las viviendas que no tienen valores del barrio
+list_limpiado_pisos2 <- list_limpiado_pisos %>%
+  filter(!(is.na(neighborhood_overview) & is.na(host_about)))
+```
+
+```{r}
+numNA = apply(list_limpiado_pisos2, 2, function(x) sum(is.na(x)))
+percNA = round(100*apply(list_limpiado_pisos2, 2, function(x) mean(is.na(x))), 2)
+tablaNA = data.frame("Variable" = colnames(list_limpiado_pisos2), numNA, percNA)
+tablaNA
+```
+# Variabilidad de las variables numéricas (desviación típica)
+```{r}
+mySD = apply(list_limpiado_pisos2[,descValList$variable[descdat$tipo == "numerical"]], 2, sd, na.rm=TRUE)   #Calculamos la desviación típica (SD) 
+mySD
+```
+# Mejor calcular el coeficiente de variación porque no depende de las unidades o magnitud de las variables
+```{r}
+myMU = colMeans(INE_limpio[,descdat$variable[descdat$tipo == "numerical"]], na.rm=TRUE)
+myMU#La media
+myCV = mySD/myMU  #Obtenemos el coeficiente de variación (que al dividir por la media eliminamos las magnitudes)
+sort(myCV)  #Mostramos ordenando por coeficiente de variación
+```
+
+##binarias
+```{r}
+apply(list_limpiado_pisos2[,descValList$variable[descValList$tipo == "binary"]], 2, table, useNA = "i")
+```
+
+```{r}
+# Identificar las columnas binarias
+binarias <- which(sapply(list_limpiado_pisos2, function(x) length(unique(x)) == 2))
+
+# Crear un nuevo dataframe excluyendo las columnas binarias
+list_sin_binarias <- list_limpiado_pisos2[, -binarias]
+```
+
+##pca
+```{r}
+library(FactoMineR)
+library(factoextra)
+res.pca = PCA(list_limpiado_pisos2, scale.unit = TRUE, graph = FALSE, ncp = 4,  quanti.sup = c(45), quali.sup = which(descValList$tipo %in% c('text', 'binary')))
+eig.val <- get_eigenvalue(res.pca)
+VPmedio = 100 * (1/nrow(eig.val))
+fviz_eig(res.pca, addlabels = TRUE) +
+  geom_hline(yintercept=VPmedio, linetype=2, color="red")
+kable(eig.val[1:16,])
+K = 4
+```
+```{r}
+res.pca$var$contrib
+fviz_contrib(res.pca, choice = "var", axes = 1) # PC1
+fviz_contrib(res.pca, choice = "var", axes = 2) # PC2
+fviz_contrib(res.pca, choice = "var", axes = 3) # PC3
+fviz_contrib(res.pca, choice = "var", axes = 4) # PC4
+```
+```{r}
+misScores = res.pca$ind$coord[,1:K]
+miT2 = colSums(t(misScores**2)/eig.val[1:K,1])
+I = nrow(INE_limpio)
+F95 = K*(I**2 - 1)/(I*(I - K)) * qf(0.95, K, I-K)
+F99 = K*(I**2 - 1)/(I*(I - K)) * qf(0.99, K, I-K)
+
+plot(1:length(miT2), miT2, type = "p", xlab = "Datos", ylab = "T2")
+abline(h = F95, col = "orange", lty = 2, lwd = 2)
+abline(h = F99, col = "red3", lty = 2, lwd = 2)
+```
+
