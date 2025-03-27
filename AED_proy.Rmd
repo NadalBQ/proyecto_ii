@@ -154,7 +154,7 @@ mySD
 ```
 # Mejor calcular el coeficiente de variación porque no depende de las unidades o magnitud de las variables
 ```{r}
-myMU = colMeans(INE_limpio[,descdat$variable[descdat$tipo == "numerical"]], na.rm=TRUE)
+myMU = colMeans(list_limpiado_pisos2[,descValList$variable[descdat$tipo == "numerical"]], na.rm=TRUE)
 myMU#La media
 myCV = mySD/myMU  #Obtenemos el coeficiente de variación (que al dividir por la media eliminamos las magnitudes)
 sort(myCV)  #Mostramos ordenando por coeficiente de variación
