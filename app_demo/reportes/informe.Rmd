@@ -1,0 +1,10 @@
+---
+title: \"Informe de Predicción de Vivienda\"
+output: pdf_document
+params:
+  pred: NA
+---
+
+```{r}
+# Cargar paquetes necesarios
+library(ggplot2)
