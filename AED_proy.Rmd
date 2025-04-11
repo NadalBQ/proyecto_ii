@@ -21,13 +21,15 @@ head(val_rev, 3)
 # Limpiar listings.csv
 
 ```{r limpiar list}
+
 # quitar las variables que no vamos a usar
 
 list_limpiado = subset(val_list, select = -c(listing_url, scrape_id, last_scraped, source, picture_url, host_url, host_thumbnail_url, host_picture_url, minimum_minimum_nights, maximum_minimum_nights, minimum_maximum_nights, maximum_maximum_nights, minimum_nights_avg_ntm, maximum_nights_avg_ntm, calendar_updated, availability_30, availability_60, availability_90, calendar_last_scraped, number_of_reviews_l30d, calculated_host_listings_count, room_type, bathrooms_text, beds, calculated_host_listings_count, calculated_host_listings_count_entire_homes, calculated_host_listings_count_private_rooms, calculated_host_listings_count_shared_rooms))
-head(list_limpiado, 3)
+
 
 # Crear una nueva columna para el precio sin el símbolo $
-list_limpiado$dollarPrice <- as.numeric(gsub("\\$", "", list_limpiado$price))
+list_limpiado$price <- as.numeric(gsub("\\$", "", list_limpiado$price))
+head(list_limpiado, 3)
 ```
 
 ## Seleccionamos los pisos enteros
@@ -48,7 +50,7 @@ head(list_limpiado_pisos)
 #creamos una tabla de las variables y su tipo
 
 descValList = data.frame("variable" = colnames(list_limpiado_pisos),
-                      "tipo" = c("text", rep("text", 4), rep("text", 7), "binary", "text", rep("numerical", 2), "text", rep("binary", 2), rep("text", 3), rep("numerical", 2), "text", rep("numerical", 3), rep("text", 2), rep("numerical", 2), "binary", rep("numerical", 3), rep("text", 2), rep("numerical", 7), "text", "binary",rep("numerical", 2)),  stringsAsFactors = FALSE)
+                      "tipo" = c("text", rep("text", 4), rep("text", 7), "binary", "text", rep("numerical", 2), "text", rep("binary", 2), rep("text", 3), rep("numerical", 2), "text", rep("numerical", 3), "text", rep("numerical", 3), "binary", rep("numerical", 3), rep("text", 2), rep("numerical", 7), "text", "binary", "numerical"),  stringsAsFactors = FALSE)
 rownames(descValList) = descValList$variable
 descValList
 ```
@@ -147,11 +149,13 @@ percNA = round(100*apply(list_limpiado_pisos2, 2, function(x) mean(is.na(x))), 2
 tablaNA = data.frame("Variable" = colnames(list_limpiado_pisos2), numNA, percNA)
 tablaNA
 ```
+
 # Variabilidad de las variables numéricas (desviación típica)
 ```{r}
 mySD = apply(list_limpiado_pisos2[,descValList$variable[descValList$tipo == "numerical"]], 2, sd, na.rm=TRUE)   #Calculamos la desviación típica (SD) 
 mySD
 ```
+
 # Mejor calcular el coeficiente de variación porque no depende de las unidades o magnitud de las variables
 ```{r}
 myMU = colMeans(list_limpiado_pisos2[,descValList$variable[descValList$tipo == "numerical"]], na.rm=TRUE)
@@ -170,7 +174,7 @@ apply(list_limpiado_pisos2[,descValList$variable[descValList$tipo == "binary"]],
 library(FactoMineR)
 library(factoextra)
 library(knitr)
-res.pca = PCA(list_limpiado_pisos2, scale.unit = TRUE, graph = FALSE, ncp = 4,  quanti.sup = c(45), quali.sup = which(descValList$tipo %in% c('text', 'binary')))
+res.pca = PCA(list_limpiado_pisos2, scale.unit = TRUE, graph = FALSE, ncp = 4,  quanti.sup = 27, quali.sup = which(descValList$tipo %in% c('text', 'binary')))
 eig.val <- get_eigenvalue(res.pca)
 VPmedio = 100 * (1/nrow(eig.val))
 fviz_eig(res.pca, addlabels = TRUE) +
@@ -204,14 +208,17 @@ threshold = F99
 outliers <- which(miT2 > threshold)
 print(outliers)
 ```
+
 ```{r}
 indices_F95 <- which(miT2 > F95) # Valores que exceden el límite del 95%
 indices_F99 <- which(miT2 > F99) # Valores que exceden el límite del 99%
 print(indices_F99)
 ```
+
 ```{r}
 list_limpiado_pisos2[indices_F99, ] # Observaciones que exceden F99
 ```
+
 ```{r}
 # Extraer las coordenadas de las observaciones anómalas
 coordenadas_anomalas <- res.pca$ind$coord[indices_F99, ]
@@ -235,6 +242,7 @@ for (fila in descValList$variable[descValList$tipo=="numerical"]) {
   boxplot(list_limpiado_pisos2[,fila],xlab=fila,las = 2)   # mfcol
 }
 ```
+
 Se van a transformar las variables numéricas que contengan datos muy extremos, ya que podrían modificar los resultados de los estudios.
 
 ```{r host_total_listings_count}
@@ -243,6 +251,7 @@ library(dplyr)
 list_limpiado_pisos2 <- list_limpiado_pisos2 %>%
   filter(host_total_listings_count <= 400)
 ```
+
 ```{r host:listings_count}
 table (list_limpiado_pisos2$host_listings_count[list_limpiado_pisos2$host_listings_count>800])
 library(dplyr)
@@ -251,17 +260,25 @@ list_limpiado_pisos2 <- list_limpiado_pisos2 %>%
 ```
 
 Se ha decidido eliminar los apartamentos con un mínimo nº de noches demasiado alto, se ha fijado en 30 días (aproximadamente un mes)
+
 ```{r minimum_nights}
 table (list_limpiado_pisos2$minimum_nights[list_limpiado_pisos2$minimum_nights>30])
 library(dplyr)
 list_limpiado_pisos2 <- list_limpiado_pisos2 %>%
   filter(minimum_nights <= 30)
 ```
-Se ha decidido eliminar del dataset apartamentos con precios demasiado elevados, se ha fijado el precio máximo en 600€.
-```{r dollarPrice}
-table (list_limpiado_pisos2$dollarPrice[list_limpiado_pisos2$dollarPrice>600])
+
+```{r unir}
 library(dplyr)
-list_limpiado_pisos2 <- list_limpiado_pisos2 %>%
-  filter(dollarPrice <= 600)
+colnames(list_limpiado_pisos2)[colnames(list_limpiado_pisos2) == "id"] <- "listing_id"
+head(list_limpiado_pisos2, 3)
+unido = merge(list_limpiado_pisos2, val_rev, by = "listing_id", all.x = TRUE)
+head(unido, 3)
+```
+
+
+```{r csv}
+write.csv(unido, "valencia_unido.csv")
+```
 ```
 
