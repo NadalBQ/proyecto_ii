@@ -1,0 +1,112 @@
+---
+title: "Renta_precio_Nadal"
+author: "Nadal"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r Carga de datos}
+val = read.csv("valencia_traducido.csv") # datos de airbnb
+ine = read.csv("INE_limpio.csv") # datos de toda España
+ineValencia = read.csv("valenciaINE.csv") # selección de Valencia de todo el fichero
+head(val)
+head(ine)
+```
+
+```{r Análisis exploratorio}
+ine$zona_general <- sub(
+  pattern = "^([0-9]{5}).*?\\s+(.*?)(\\s+distrito.*|\\s+sección.*|$)",
+  replacement = "\\1 \\2",
+  x = ine$Zona
+)
+#print(unique(val$neighbourhood_cleansed))
+#print(unique(val$neighbourhood_group_cleansed))
+#print(unique(ine$Zona))
+print(unique(ine$zona_general))
+```
+Tras la lectura de los datos eliminamos de la tabla del INE las filas que contengan la palabra Distrito o Sección creando una nueva variable llamada zona_general en la que almacenamos las ciudades de las que tenemos datos. La que nos interesa es València, la salida 333 del código anterior.
+
+```{r Generación fichero de paso}
+# Pretendemos generar un archivo csv en el que podamos añadir cómodamente a mano
+# el código y nombre del barrio de cada sección de Valencia para realizar más adelante
+# el análisis del precio de la vivienda en relación con la renta media por barrio.
+# la fuente de datos de barrios y secciones:
+# 'https://www.valencia.es/cas/distritos'
+library(dplyr)
+library(readr)
+
+
+# Filtrar solo las filas que contienen la palabra "sección"
+datos_secciones <- ineValencia %>%
+  filter(grepl("sección", ineValencia[[1]]))   # Asume que la columna 1 es la de códigos
+
+# Renombrar la primera columna para mayor claridad
+names(datos_secciones)[1] <- "Codigo"
+
+# Separar los componentes del código
+datos_procesados <- datos_secciones %>%
+  mutate(
+    Codigo_Ciudad = substr(Codigo, 1, 5),
+    Codigo_Distrito = substr(Codigo, 6, 7),
+    Codigo_Seccion = substr(Codigo, 8, 11),
+    Codigo_Barrio = "",  # Para rellenarlo a mano con los datos del ayuntamiento de Valencia
+    Nombre_Ciudad = "València",
+    Nombre_Distrito = paste("Distrito", Codigo_Distrito),
+    Nombre_Barrio = ""   # Para rellenarlo según el código del barrio
+  ) %>%
+  select(
+    Codigo_Ciudad,
+    Codigo_Distrito,
+    Codigo_Barrio,
+    Codigo_Seccion,
+    Nombre_Ciudad,
+    Nombre_Distrito,
+    Nombre_Barrio,
+    everything()  # El resto de columnas de datos
+  )
+
+# Guardar el resultado en un nuevo archivo CSV
+write_csv(datos_procesados, "ineValencia_desglosado.csv")
+
+```
+
+```{r Lectura nuevo fichero del INE}
+ine = read.csv("ineValenciaFinal.csv", sep = ";")
+
+head(ine)
+
+```
+
+
+```{r Map plot, echo=FALSE}
+# https://r-graph-gallery.com/325-background-map-from-geojson-format-in-r.html
+# https://geoportal.valencia.es/apps/OpenData/UrbanismoEInfraestructuras/SecCensales.json
+tmp_geojson <- tempfile(fileext = ".geojson")
+download.file(
+  "https://geoportal.valencia.es/apps/OpenData/UrbanismoEInfraestructuras/SecCensales.json",
+  tmp_geojson
+) # toma los datos del archivo del enlace anterior
+library(sf)
+library(ggplot2)
+library(ggspatial)
+my_sf <- read_sf(tmp_geojson)
+ggplot(my_sf) +
+  geom_sf() +
+    annotation_scale(location = "bl", width_hint = 0.5)#  +
+    # annotation_north_arrow(location = "bl", which_north = "true", 
+        # pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+        # style = north_arrow_fancy_orienteering)
+#ggsave("map_web.png")
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
