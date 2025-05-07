@@ -9,12 +9,9 @@ output: word_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+## Análisis de la relación Renta media por barrio-Precio de alquiler de Airbnb
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
+### Análisis exploratorio y preproceso
 ```{r Carga de datos}
 val = read.csv("valencia_traducido.csv") # datos de airbnb
 ine = read.csv("INE_limpio.csv") # datos de toda España
@@ -34,9 +31,9 @@ ine$zona_general <- sub(
 #print(unique(ine$Zona))
 print(unique(ine$zona_general))
 ```
-Tras la lectura de los datos eliminamos de la tabla del INE las filas que contengan la palabra Distrito o Sección creando una nueva variable llamada zona_general en la que almacenamos las ciudades de las que tenemos datos. La que nos interesa es València, la salida 333 del código anterior.
+Tras la lectura de los datos eliminamos de la tabla del INE las filas que contengan la palabra Distrito o Sección, creando una nueva variable llamada zona_general en la que almacenamos las ciudades de las que tenemos datos. La que nos interesa es València, la salida `333` del código anterior.
 
-```{r Generación fichero de paso}
+```{r Generación fichero de paso (Preprocesado adicional)}
 # Pretendemos generar un archivo csv en el que podamos añadir cómodamente a mano
 # el código y nombre del barrio de cada sección de Valencia para realizar más adelante
 # el análisis del precio de la vivienda en relación con la renta media por barrio.
@@ -102,7 +99,7 @@ library(ggspatial)
 my_sf <- read_sf(tmp_geojson)
 ggplot(my_sf) +
   geom_sf() +
-    annotation_scale(location = "bl", width_hint = 0.5)#  +
+    annotation_scale(location = "bl", width_hint = 0.3)#  +
     # annotation_north_arrow(location = "bl", which_north = "true", 
         # pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
         # style = north_arrow_fancy_orienteering)
