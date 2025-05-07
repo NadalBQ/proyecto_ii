@@ -1,0 +1,352 @@
+---
+title: "Precio por zona"
+author: "Toni"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+pisos = read.csv("listings_valencia.csv", sep = ',')
+```
+
+```{r}
+library(dplyr)
+
+pisos %>%
+  group_by(pisos$neighbourhood_cleansed) %>%
+  summarise(
+    media = mean(dollarPrice, na.rm = TRUE),
+    mediana = median(dollarPrice, na.rm = TRUE),
+    sd = sd(dollarPrice, na.rm = TRUE),
+    n = n()
+  ) %>%
+  arrange(desc(media))
+```
+
+```{r}
+library(dplyr)
+pisos %>%
+  group_by(neighbourhood_group_cleansed, neighbourhood_cleansed) %>%
+  summarise(
+    media_precio = mean(dollarPrice, na.rm = TRUE),
+    mediana_precio = median(dollarPrice, na.rm = TRUE),
+    n_anuncios = n()
+  ) %>%
+  arrange(neighbourhood_group_cleansed, desc(media_precio))
+```
+
+```{r}
+# Definir el umbral mínimo de observaciones
+umbral_minimo <- 5
+
+# Calcular el número de observaciones por barrio
+observaciones_por_barrio <- pisos %>%
+  group_by(neighbourhood_cleansed) %>%
+  summarise(n = n())
+
+# Filtrar los barrios con al menos el umbral mínimo de observaciones
+barrios_filtrados <- observaciones_por_barrio %>%
+  filter(n >= umbral_minimo)
+
+# Filtrar los datos originales para incluir solo los barrios con suficientes observaciones
+pisos_filtrados <- pisos %>%
+  filter(neighbourhood_cleansed %in% barrios_filtrados$neighbourhood_cleansed)
+
+```
+
+```{r}
+library(sf)
+library(ggplot2)
+library(dplyr)
+
+barrios <- st_read("valencia.geojson")  # Asegúrate de que el archivo esté en tu directorio de trabajo
+
+# Calcular estadísticas por barrio
+precios_zona <- pisos_filtrados %>%
+  group_by(neighbourhood_cleansed) %>%
+  summarise(
+    media_precio = mean(dollarPrice, na.rm = TRUE)
+  )
+
+# Unir los datos espaciales con los precios
+# Asegúrate de que el nombre de la columna en 'barrios' que contiene los nombres de los barrios coincida con 'neighbourhood_group_cleansed'
+# Por ejemplo, si la columna se llama 'nombre_barrio', ajusta el código así:
+barrios_precios <- barrios %>%
+  left_join(precios_zona, by = c("nombre" = "neighbourhood_cleansed"))
+
+```
+
+```{r}
+library(ggplot2)
+library(viridis)
+
+ggplot(data = barrios_precios) +
+  geom_sf(aes(fill = media_precio), 
+          color = "white", 
+          size = 0.3, 
+          show.legend = TRUE) +
+  scale_fill_viridis(
+    option = "plasma",
+    name = "€/noche",
+    na.value = "grey90",
+    direction = -1
+  ) +
+  coord_sf(expand = FALSE) +
+  labs(
+    title = "Precio medio de alojamiento por barrio (Valencia)",
+    subtitle = "Según datos de Airbnb",
+    caption = "Fuente: listings_final1.csv"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank()
+  )
+
+```
+
+```{r}
+# Calcular la media de los precios por barrio
+precios_por_barrio <- pisos_filtrados %>%
+  group_by(neighbourhood_cleansed) %>%
+  summarise(media_precio = mean(dollarPrice, na.rm = TRUE))
+
+# Ordenar los barrios por la media de los precios
+precios_por_barrio <- precios_por_barrio %>%
+  arrange(media_precio)
+
+# Dividir los barrios en dos grupos (la mitad inferior y la mitad superior por precio)
+mitad_inferior <- precios_por_barrio[1:(nrow(precios_por_barrio) %/% 2), ]
+mitad_superior <- precios_por_barrio[(nrow(precios_por_barrio) %/% 2 + 1):nrow(precios_por_barrio), ]
+
+# Filtrar los datos originales para obtener solo los barrios de cada mitad
+pisos_mitad_inferior <- pisos %>% filter(neighbourhood_cleansed %in% mitad_inferior$neighbourhood_cleansed)
+pisos_mitad_superior <- pisos %>% filter(neighbourhood_cleansed %in% mitad_superior$neighbourhood_cleansed)
+
+# Boxplot para la mitad inferior de barrios
+ggplot(pisos_mitad_inferior, aes(x = neighbourhood_cleansed, y = dollarPrice)) +
+  geom_boxplot() +
+  labs(title = "Distribución de Precios por Barrio (Mitad Inferior)", x = "Barrio", y = "Precio ($)") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Boxplot para la mitad superior de barrios
+ggplot(pisos_mitad_superior, aes(x = neighbourhood_cleansed, y = dollarPrice)) +
+  geom_boxplot() +
+  labs(title = "Distribución de Precios por Barrio (Mitad Superior)", x = "Barrio", y = "Precio ($)") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+```
+
+```{r}
+# Calcular los percentiles 10 y 90 de los precios
+percentil_10 <- quantile(pisos$dollarPrice, 0.10, na.rm = TRUE)
+percentil_90 <- quantile(pisos$dollarPrice, 0.90, na.rm = TRUE)
+
+# Filtrar los datos para incluir solo los precios entre el percentil 10 y 90
+pisos_filtrados <- pisos_filtrados %>%
+  filter(dollarPrice >= percentil_10 & dollarPrice <= percentil_90)
+
+# Calcular la media de los precios por barrio para los datos filtrados
+precios_por_barrio_filtrados <- pisos_filtrados %>%
+  group_by(neighbourhood_cleansed) %>%
+  summarise(media_precio = mean(dollarPrice, na.rm = TRUE))
+
+# Ordenar los barrios por la media de los precios filtrados
+precios_por_barrio_filtrados <- precios_por_barrio_filtrados %>%
+  arrange(media_precio)
+
+# Dividir los barrios en dos grupos (la mitad inferior y la mitad superior por precio filtrado)
+mitad_inferior_filtrada <- precios_por_barrio_filtrados[1:(nrow(precios_por_barrio_filtrados) %/% 2), ]
+mitad_superior_filtrada <- precios_por_barrio_filtrados[(nrow(precios_por_barrio_filtrados) %/% 2 + 1):nrow(precios_por_barrio_filtrados), ]
+
+# Filtrar los datos originales para obtener solo los barrios de cada mitad
+pisos_mitad_inferior_filtrada <- pisos_filtrados %>% filter(neighbourhood_cleansed %in% mitad_inferior_filtrada$neighbourhood_cleansed)
+pisos_mitad_superior_filtrada <- pisos_filtrados %>% filter(neighbourhood_cleansed %in% mitad_superior_filtrada$neighbourhood_cleansed)
+
+# Boxplot para la mitad inferior de barrios filtrados
+ggplot(pisos_mitad_inferior_filtrada, aes(x = neighbourhood_cleansed, y = dollarPrice)) +
+  geom_boxplot() +
+  labs(title = "Distribución de Precios por Barrio (Mitad Inferior Filtrada)", x = "Barrio", y = "Precio ($)") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Boxplot para la mitad superior de barrios filtrados
+ggplot(pisos_mitad_superior_filtrada, aes(x = neighbourhood_cleansed, y = dollarPrice)) +
+  geom_boxplot() +
+  labs(title = "Distribución de Precios por Barrio (Mitad Superior Filtrada)", x = "Barrio", y = "Precio ($)") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+CLUSTERING 
+
+Significa que estás modelando el precio (dollarPrice) como una combinación lineal de:
+
+número de dormitorios (bedrooms)
+
+número de baños (bathrooms)
+
+capacidad de alojamiento (accommodates)
+
+```{r}
+summary(lm(dollarPrice ~ bedrooms + bathrooms + accommodates, data = pisos))
+```
+2. Coeficientes del modelo
+Variable	Estimate	Interpretación
+(Intercept)	5.29	Precio base si todas las variables son 0 (no tiene mucho sentido práctico, pero es necesario matemáticamente).
+bedrooms	9.49	Cada dormitorio extra aumenta el precio en promedio 9.49 dólares, manteniendo lo demás constante.
+bathrooms	28.77	Cada baño extra aumenta el precio en promedio 28.77 dólares, todo lo demás constante.
+accommodates	13.81	Cada persona adicional que puede alojarse aumenta el precio en promedio 13.81 dólares, todo lo demás igual.
+
+💡 Conclusión: El número de baños y accommodates tienen un impacto más fuerte que bedrooms según este modelo.
+
+ 3. Significancia estadística
+Todos los predictores tienen un valor p muy bajo (* < 0.001)** → Son estadísticamente significativos.
+
+bedrooms, bathrooms, accommodates contribuyen de forma significativa a predecir el precio.
+
+📉 4. Calidad del modelo
+Residual standard error: 64.21 → Los errores (diferencias entre predicción y valor real) tienen un desvío estándar promedio de $64. No es muy bajo, pero depende del rango de precios.
+
+R-squared: 0.298 → El modelo explica un 29.8% de la variabilidad del precio.
+
+No es muy alto, lo cual es común en precios de vivienda, que suelen depender de muchas más variables (ubicación, estado, amenities…).
+
+Conclusión: El modelo captura cierta estructura, pero hay mucha variación no explicada.
+
+```{r}
+pisos$precio_ponderado <- 9.4864 * pisos$bedrooms + 28.7716 * pisos$bathrooms + 13.8108 * pisos$accommodates
+```
+
+```{r}
+pisos$relacion_precio = pisos$dollarPrice / pisos$precio_ponderado
+```
+
+```{r}
+zonas <- pisos %>%
+  group_by(neighbourhood_cleansed) %>%
+  summarise(
+    precio_medio = mean(dollarPrice, na.rm = TRUE),
+    ponderado_medio = mean(precio_ponderado, na.rm = TRUE),
+    relacion_precio_media = mean(relacion_precio, na.rm = TRUE),
+    n = n()
+  )
+```
+
+```{r}
+library(grid)
+library(gridExtra)
+library(factoextra)
+p1 = fviz_nbclust(x = zonas, FUNcluster = hcut, method = "silhouette", 
+                  hc_method = "ward.D2", k.max = 10, verbose = FALSE, 
+                  hc_metric = "euclidean") + labs(title = "Num. optimo clusters")
+p2 = fviz_nbclust(x = zonas, FUNcluster = hcut, method = "wss", 
+                  hc_method = "ward.D2", k.max = 10, verbose = FALSE, 
+                  hc_metric = "euclidean") + labs(title = "Num. optimo clusters")
+grid.arrange(p1, p2, nrow = 1)
+```
+
+```{r}
+clustering_data <- zonas %>%
+  select(relacion_precio_media) %>%
+  scale()
+
+kmeans_result <- kmeans(clustering_data, centers = 3)
+zonas$cluster <- kmeans_result$cluster
+View(zonas)
+```
+
+```{r}
+# Aplicar el clustering jerárquico
+hc <- hclust(dist(zonas), method = "ward.D2")
+
+# Cortar el árbol jerárquico para obtener los clusters (ajusta k según lo que encuentres)
+zonas$cluster <- cutree(hc, k = 2)
+
+# Ver los resultados
+head(zonas)
+```
+
+```{r}
+library(ggplot2)
+
+# Gráfico de dispersión: Precio Medio vs Precio Ponderado Medio, coloreado por cluster
+ggplot(zonas, aes(x = ponderado_medio, y = precio_medio, color = factor(cluster))) +
+  geom_point(size = 3, alpha = 0.7) +  # Puntos
+  scale_color_manual(values = c("red", "blue")) +  # Personaliza colores
+  labs(title = "Precio Medio vs Precio Ponderado Medio por Cluster",
+       x = "Precio Ponderado Medio",
+       y = "Precio Medio",
+       color = "Cluster") +
+  theme_minimal()
+
+```
+
+```{r}
+
+```
+
+```{r}
+# Cambiar el nombre de la columna 'old_name' a 'new_name'
+colnames(zonas)[colnames(zonas) == "neighbourhood_cleansed"] <- "nombre"
+library(dplyr)
+
+# Unir el GeoJSON con el dataframe de zonas utilizando 'nombre_barrio'
+zonas_geojson <- left_join(barrios, zonas, by = "nombre")
+head(zonas_geojson)
+
+```
+```{r}
+library(leaflet)
+
+# Definir los colores para los clusters
+pal <- colorFactor(c("red", "blue"), domain = c(1, 2))  # Ajusta los colores según tus clusters
+
+# Crear el mapa choropleth
+leaflet(data = zonas_geojson) %>%
+  addTiles() %>%  # Añadir capa de mapas base
+  addPolygons(
+    fillColor = ~pal(cluster),  # Colorea las zonas según su cluster
+    weight = 1,
+    opacity = 1,
+    color = "white",
+    dashArray = "3",
+    fillOpacity = 0.7,
+    popup = ~paste("Barrio:", nombre, "<br>Cluster:", cluster)  # Mostrar información sobre cada zona
+  ) %>%
+  addLegend(
+    position = "bottomright",
+    pal = pal,
+    values = ~cluster,
+    title = "Clusters",
+    opacity = 1
+  )
+
+```
+```{r}
+head(barrios)
+```
+```{r}
+View(zonas)
+```
+💡 Interpretación del gráfico
+En tu gráfico (Precio Medio vs Precio Ponderado Medio):
+
+Zonas del Cluster 1 (rojo): centro y playa, tienen precios medios altos, pero están alineadas bastante bien con el precio ponderado, es decir, el alto precio se justifica por las características de los inmuebles.
+
+Zonas del Cluster 2 (azul): más dispersas, hay zonas con precio medio no tan alto, pero con precios ponderados más bajos o menos consistentes, lo que sugiere más variabilidad y menos relación clara entre calidad y precio.
+
+🤔 ¿Por qué podría pasar esto?
+En zonas como el centro o la playa, el mercado es más maduro y los precios suelen reflejar más consistentemente la calidad: lo caro suele ser caro por razones estructurales (más metros, mejor ubicación, etc.).
+
+En otras zonas puede haber más distorsión: por ejemplo, pisos antiguos con pocos servicios que aún así tienen precios altos por especulación o baja oferta.
+
+
