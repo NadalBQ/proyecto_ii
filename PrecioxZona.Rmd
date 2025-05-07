@@ -2,20 +2,37 @@
 title: "Precio por zona"
 author: "Toni"
 date: "`r Sys.Date()`"
-output: html_document
+output:
+  html_document: default
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
-
+##LECTURA DE DATOS
+Para realizar el estudio de precio de alquiler de airbnb por barrios se necesita el fichero obtenido a partir de la limpieza de listings (sin las reseñas)
 ```{r}
 pisos = read.csv("listings_valencia.csv", sep = ',')
 ```
-
+##LIBRERÍAS
+Librerias que se van a utilizar:
 ```{r}
 library(dplyr)
+library(sf)
+library(ggplot2)
+library(viridis)
+library(grid)
+library(gridExtra)
+library(factoextra)
+library(readr)
+library(leaflet)
+```
 
+##ANÁLISIS DE BARRIOS
+Una vez se ha leído el fichero correctamente, ser observan algunos parámetros estadísticos que pueden ser útiles para este análisis, como es el caso de la media, la mediana o la desviación típica del la variable dollarPrice(precio del alquiler).
+
+```{r}
 pisos %>%
   group_by(pisos$neighbourhood_cleansed) %>%
   summarise(
@@ -27,46 +44,12 @@ pisos %>%
   arrange(desc(media))
 ```
 
+Ahora se va mostrar un mapa de calor y gráficos boxplot para visualizar mejor el precio por barrio, pero antes hay que juntar dos archivos. El archivo geojson de la ciudad de valencia con el de listings, para poder visualizar los datos.
 ```{r}
-library(dplyr)
-pisos %>%
-  group_by(neighbourhood_group_cleansed, neighbourhood_cleansed) %>%
-  summarise(
-    media_precio = mean(dollarPrice, na.rm = TRUE),
-    mediana_precio = median(dollarPrice, na.rm = TRUE),
-    n_anuncios = n()
-  ) %>%
-  arrange(neighbourhood_group_cleansed, desc(media_precio))
-```
-
-```{r}
-# Definir el umbral mínimo de observaciones
-umbral_minimo <- 5
-
-# Calcular el número de observaciones por barrio
-observaciones_por_barrio <- pisos %>%
-  group_by(neighbourhood_cleansed) %>%
-  summarise(n = n())
-
-# Filtrar los barrios con al menos el umbral mínimo de observaciones
-barrios_filtrados <- observaciones_por_barrio %>%
-  filter(n >= umbral_minimo)
-
-# Filtrar los datos originales para incluir solo los barrios con suficientes observaciones
-pisos_filtrados <- pisos %>%
-  filter(neighbourhood_cleansed %in% barrios_filtrados$neighbourhood_cleansed)
-
-```
-
-```{r}
-library(sf)
-library(ggplot2)
-library(dplyr)
-
 barrios <- st_read("valencia.geojson")  # Asegúrate de que el archivo esté en tu directorio de trabajo
 
 # Calcular estadísticas por barrio
-precios_zona <- pisos_filtrados %>%
+precios_zona <- pisos %>%
   group_by(neighbourhood_cleansed) %>%
   summarise(
     media_precio = mean(dollarPrice, na.rm = TRUE)
@@ -77,12 +60,10 @@ precios_zona <- pisos_filtrados %>%
 # Por ejemplo, si la columna se llama 'nombre_barrio', ajusta el código así:
 barrios_precios <- barrios %>%
   left_join(precios_zona, by = c("nombre" = "neighbourhood_cleansed"))
-
 ```
+A continuación se muestra el mapa:
 
 ```{r}
-library(ggplot2)
-library(viridis)
 
 ggplot(data = barrios_precios) +
   geom_sf(aes(fill = media_precio), 
@@ -110,12 +91,13 @@ ggplot(data = barrios_precios) +
     axis.ticks = element_blank(),
     panel.grid = element_blank()
   )
-
 ```
+Se observa que el mapa sale distorsionado y no se puede comprobar bien la información, por un barrio con un precio muy elevado, hay que realizar una comprobación para solucionarlo, se va a ver con más detalle con los gráficos boxplot.
+
 
 ```{r}
 # Calcular la media de los precios por barrio
-precios_por_barrio <- pisos_filtrados %>%
+precios_por_barrio <- pisos %>%
   group_by(neighbourhood_cleansed) %>%
   summarise(media_precio = mean(dollarPrice, na.rm = TRUE))
 
@@ -145,15 +127,12 @@ ggplot(pisos_mitad_superior, aes(x = neighbourhood_cleansed, y = dollarPrice)) +
 
 
 ```
+En este gráfico no se puede comprobar mucho debido a la cantidad de atípicos que hay, por ello se va a realizar el mismo gráfico pero filtrado por un precio más bajo:
 
 ```{r}
-# Calcular los percentiles 10 y 90 de los precios
-percentil_10 <- quantile(pisos$dollarPrice, 0.10, na.rm = TRUE)
-percentil_90 <- quantile(pisos$dollarPrice, 0.90, na.rm = TRUE)
-
-# Filtrar los datos para incluir solo los precios entre el percentil 10 y 90
-pisos_filtrados <- pisos_filtrados %>%
-  filter(dollarPrice >= percentil_10 & dollarPrice <= percentil_90)
+# Filtrar los datos para incluir solo los precios menores o iguales a 750
+pisos_filtrados <- pisos %>%
+  filter(dollarPrice <= 400)
 
 # Calcular la media de los precios por barrio para los datos filtrados
 precios_por_barrio_filtrados <- pisos_filtrados %>%
@@ -169,82 +148,157 @@ mitad_inferior_filtrada <- precios_por_barrio_filtrados[1:(nrow(precios_por_barr
 mitad_superior_filtrada <- precios_por_barrio_filtrados[(nrow(precios_por_barrio_filtrados) %/% 2 + 1):nrow(precios_por_barrio_filtrados), ]
 
 # Filtrar los datos originales para obtener solo los barrios de cada mitad
-pisos_mitad_inferior_filtrada <- pisos_filtrados %>% filter(neighbourhood_cleansed %in% mitad_inferior_filtrada$neighbourhood_cleansed)
-pisos_mitad_superior_filtrada <- pisos_filtrados %>% filter(neighbourhood_cleansed %in% mitad_superior_filtrada$neighbourhood_cleansed)
+pisos_mitad_inferior_filtrada <- pisos_filtrados %>%
+  filter(neighbourhood_cleansed %in% mitad_inferior_filtrada$neighbourhood_cleansed)
+
+pisos_mitad_superior_filtrada <- pisos_filtrados %>%
+  filter(neighbourhood_cleansed %in% mitad_superior_filtrada$neighbourhood_cleansed)
 
 # Boxplot para la mitad inferior de barrios filtrados
 ggplot(pisos_mitad_inferior_filtrada, aes(x = neighbourhood_cleansed, y = dollarPrice)) +
   geom_boxplot() +
-  labs(title = "Distribución de Precios por Barrio (Mitad Inferior Filtrada)", x = "Barrio", y = "Precio ($)") +
+  labs(title = "Distribución de Precios por Barrio (Mitad Inferior, Precio <= 750)", x = "Barrio", y = "Precio ($)") +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
 # Boxplot para la mitad superior de barrios filtrados
 ggplot(pisos_mitad_superior_filtrada, aes(x = neighbourhood_cleansed, y = dollarPrice)) +
   geom_boxplot() +
-  labs(title = "Distribución de Precios por Barrio (Mitad Superior Filtrada)", x = "Barrio", y = "Precio ($)") +
+  labs(title = "Distribución de Precios por Barrio (Mitad Superior, Precio <= 400)", x = "Barrio", y = "Precio ($)") +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
 ```
-
-CLUSTERING 
-
-Significa que estás modelando el precio (dollarPrice) como una combinación lineal de:
-
-número de dormitorios (bedrooms)
-
-número de baños (bathrooms)
-
-capacidad de alojamiento (accommodates)
+De esta manera se observan mejor los datos por lo que se va a fijar un precio máximo de 400€. Además,
+como se muestra en la tabla inicial, el barrio con el mayor precio medio es Carpesa, pero solo tiene 2 observaciones (2 alquileres), realmente esto no es muy representativo ya que podrían ser apartamentos de lujo o precios irreales. También aparecen barrios con precios no tan altos pero también con un nº demasiado bajos de observaciones, para acercarse lo máximo a la realidad se ha decidido eliminar los barrios con menos de 5 observaciones. 
 
 ```{r}
-summary(lm(dollarPrice ~ bedrooms + bathrooms + accommodates, data = pisos))
-```
-2. Coeficientes del modelo
-Variable	Estimate	Interpretación
-(Intercept)	5.29	Precio base si todas las variables son 0 (no tiene mucho sentido práctico, pero es necesario matemáticamente).
-bedrooms	9.49	Cada dormitorio extra aumenta el precio en promedio 9.49 dólares, manteniendo lo demás constante.
-bathrooms	28.77	Cada baño extra aumenta el precio en promedio 28.77 dólares, todo lo demás constante.
-accommodates	13.81	Cada persona adicional que puede alojarse aumenta el precio en promedio 13.81 dólares, todo lo demás igual.
+# Definir el umbral mínimo de observaciones
+umbral_minimo <- 5
 
-💡 Conclusión: El número de baños y accommodates tienen un impacto más fuerte que bedrooms según este modelo.
+# Calcular el número de observaciones por barrio
+observaciones_por_barrio <- pisos_filtrados %>%
+  group_by(neighbourhood_cleansed) %>%
+  summarise(n = n())
 
- 3. Significancia estadística
-Todos los predictores tienen un valor p muy bajo (* < 0.001)** → Son estadísticamente significativos.
+# Filtrar los barrios con al menos el umbral mínimo de observaciones
+barrios_filtrados <- observaciones_por_barrio %>%
+  filter(n >= umbral_minimo)
 
-bedrooms, bathrooms, accommodates contribuyen de forma significativa a predecir el precio.
+# Filtrar los datos originales para incluir solo los barrios con suficientes observaciones
+pisos_filtrados <- pisos %>%
+  filter(neighbourhood_cleansed %in% barrios_filtrados$neighbourhood_cleansed)
 
-📉 4. Calidad del modelo
-Residual standard error: 64.21 → Los errores (diferencias entre predicción y valor real) tienen un desvío estándar promedio de $64. No es muy bajo, pero depende del rango de precios.
-
-R-squared: 0.298 → El modelo explica un 29.8% de la variabilidad del precio.
-
-No es muy alto, lo cual es común en precios de vivienda, que suelen depender de muchas más variables (ubicación, estado, amenities…).
-
-Conclusión: El modelo captura cierta estructura, pero hay mucha variación no explicada.
-
-```{r}
-pisos$precio_ponderado <- 9.4864 * pisos$bedrooms + 28.7716 * pisos$bathrooms + 13.8108 * pisos$accommodates
 ```
 
-```{r}
-pisos$relacion_precio = pisos$dollarPrice / pisos$precio_ponderado
-```
+Para comprobar que no se detecta ninguna anomalía más se vuelve a mostrar el mapa de calor:
 
 ```{r}
-zonas <- pisos %>%
+
+# Calcular estadísticas por barrio
+precios_zona <- pisos_filtrados %>%
+  group_by(neighbourhood_cleansed) %>%
+  summarise(
+    media_precio = mean(dollarPrice, na.rm = TRUE)
+  )
+
+# Unir los datos espaciales con los precios
+# Asegúrate de que el nombre de la columna en 'barrios' que contiene los nombres de los barrios coincida con 'neighbourhood_group_cleansed'
+# Por ejemplo, si la columna se llama 'nombre_barrio', ajusta el código así:
+barrios_precios <- barrios %>%
+  left_join(precios_zona, by = c("nombre" = "neighbourhood_cleansed"))
+```
+
+
+```{r}
+
+ggplot(data = barrios_precios) +
+  geom_sf(aes(fill = media_precio), 
+          color = "white", 
+          size = 0.3, 
+          show.legend = TRUE) +
+  scale_fill_viridis(
+    option = "plasma",
+    name = "€/noche",
+    na.value = "grey90",
+    direction = -1
+  ) +
+  coord_sf(expand = FALSE) +
+  labs(
+    title = "Precio medio de alojamiento por barrio (Valencia)",
+    subtitle = "Según datos de Airbnb",
+    caption = "Fuente: listings_final1.csv"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank()
+  )
+
+```
+Ahora se observa que los precios más altos se muestran en el centro, así que se va a comprobar de nuevo:
+
+```{r}
+pisos_filtrados %>%
+  group_by(pisos_filtrados$neighbourhood_cleansed) %>%
+  summarise(
+    media = mean(dollarPrice, na.rm = TRUE),
+    mediana = median(dollarPrice, na.rm = TRUE),
+    sd = sd(dollarPrice, na.rm = TRUE),
+    n = n()
+  ) %>%
+  arrange(desc(media))
+```
+
+Ahora los barrios con alquileres más caros son bastante representativos así que no se va a realizar ninguna filtración más.
+
+##PRECIO_PONDERADO
+Pero antes de realizar ningún estudio hay que tener en cuenta que la variable precio por si sola realmente no explica correctamente las diferencias de precios entre barrios, habría que crear una nueva variable ponderada por otras variables que también afecten al precio.
+
+En el dataset de listings solo se tienen las siguientes variables descriptivas de la vivienda: nº de habitaciones, nº de baños y acommodates, por lo que se va a realizar una regresión lineal para comprobar cuanto afecta cada variable respectivamente al precio(dollarPrice).
+
+```{r}
+summary(lm(dollarPrice ~ bedrooms + bathrooms + accommodates, data = pisos_filtrados))
+```
+A partir de este modelo se observa que todas las variables son significativas (p-valor< 0.001), por lo que influyen en el precio. La variable bedrooms toma un valor de 9.49, es decir cada dormitorio extra aumenta el precio en promedio 9.49 dólares, manteniendo lo demás constante. La variable bathrooms toma un valor de	28.77	por lo que cada baño extra aumenta el precio en promedio 28.77 dólares, todo lo demás constante. Por último, la varible accommodates toma un valor de 13.81, cada persona adicional que puede alojarse aumenta el precio en promedio 13.81 dólares, todo lo demás igual.
+
+Se llega a la conclusión de que el número de baños y accommodates tienen un impacto más fuerte que bedrooms según este modelo.
+
+El residual standard error esde 64.21. Los errores (diferencias entre predicción y valor real) tienen un desvío estándar promedio de 64 dólares. No es muy bajo, pero depende del rango de precios.
+
+El R-squared es de 0.298 por lo que el modelo explica un 29.8% de la variabilidad del precio. No es muy alto, lo cual es común en precios de vivienda, que suelen depender de muchas más variables (ubicación, estado, amenities…). Se puede decir que el modelo captura cierta estructura, aunque hay mucha variación no explicada.
+
+Ahora se va a proceder a calcular el precio ponderado de cada vivienda:
+
+```{r}
+pisos_filtrados$precio_ponderado <- 9.7842 * pisos_filtrados$bedrooms + 28.4985 * pisos_filtrados$bathrooms + 13.6448 * pisos_filtrados$accommodates
+```
+
+Una vez creada la variable precio_ponderado, se calcula una relación media para comprobar si el piso es más caro de lo que debería (>1), está en buen precio(=1) o está más barato(<1):
+```{r}
+pisos_filtrados$peso <- pisos_filtrados$dollarPrice / pisos_filtrados$precio_ponderado
+```
+
+##CLUSTERING LIMPIEZA
+Para comprobar que se ha realizado una buena limpieza de atípicos y un buen cálculo del precio ponderado, se va a realizar un clustering para observar si el precio se ajusta al precio ponderado, siendo un clúster los que se ajustan y otro los que no.
+
+```{r}
+zonas <- pisos_filtrados %>%
   group_by(neighbourhood_cleansed) %>%
   summarise(
     precio_medio = mean(dollarPrice, na.rm = TRUE),
     ponderado_medio = mean(precio_ponderado, na.rm = TRUE),
-    relacion_precio_media = mean(relacion_precio, na.rm = TRUE),
+    relacion_precio_media = mean(peso, na.rm = TRUE),
     n = n()
   )
+head(zonas)
 ```
 
+Parece que el dataset tiene buena forma así que se va a proceder al clustering, primero se calcula el nº óptimo de clusters:
+
 ```{r}
-library(grid)
-library(gridExtra)
-library(factoextra)
 p1 = fviz_nbclust(x = zonas, FUNcluster = hcut, method = "silhouette", 
                   hc_method = "ward.D2", k.max = 10, verbose = FALSE, 
                   hc_metric = "euclidean") + labs(title = "Num. optimo clusters")
@@ -253,59 +307,75 @@ p2 = fviz_nbclust(x = zonas, FUNcluster = hcut, method = "wss",
                   hc_metric = "euclidean") + labs(title = "Num. optimo clusters")
 grid.arrange(p1, p2, nrow = 1)
 ```
+En este caso, con el método de silhoutte, se determina que el nº óptimo de clusters es 2, tal y como se había deducido al principio.
 
 ```{r}
-clustering_data <- zonas %>%
-  select(relacion_precio_media) %>%
-  scale()
 
-kmeans_result <- kmeans(clustering_data, centers = 3)
-zonas$cluster <- kmeans_result$cluster
-View(zonas)
+# Seleccionar la columna 'peso' para el clustering y eliminar filas con NA, NaN o Inf
+data_clean <- pisos_filtrados %>% filter(is.finite(peso))
+
+# Realizar el clustering con k=2
+kmeans_result <- kmeans(data_clean %>% select(peso), centers = 2)
+
+# Añadir los resultados del clustering al dataframe limpio
+data_clean$cluster <- kmeans_result$cluster
+
+
+# Crear el gráfico de dispersión
+
+ggplot(data_clean, aes(x = dollarPrice, y = precio_ponderado, color = as.factor(cluster))) +
+geom_point(size = 3) +
+labs(title = "Comparación entre Precio y Precio Ponderado", x = "Precio", y = "Precio Ponderado") +
+theme_minimal()
+
+
+
 ```
+El gráfico muestra que la limpieza ha sido adecuada y que el clustering tiene sentido. Además, la comparación entre precio y precio ponderado te está ayudando a detectar viviendas que están por encima o por debajo del valor esperado para su zona, lo que es una base sólida para análisis de inversión, tasación o priorización de zonas.
 
+Ahora se va a realizar lo mismo pero por zonas:
 ```{r}
-# Aplicar el clustering jerárquico
-hc <- hclust(dist(zonas), method = "ward.D2")
 
-# Cortar el árbol jerárquico para obtener los clusters (ajusta k según lo que encuentres)
-zonas$cluster <- cutree(hc, k = 2)
+# Seleccionar la columna 'relacion_precio_media' para el clustering y eliminar filas con NA, NaN o Inf
+zonas_clean <- zonas %>% filter(is.finite(relacion_precio_media))
 
-# Ver los resultados
-head(zonas)
-```
+# Realizar el clustering con k=2
+kmeans_result <- kmeans(zonas_clean %>% select(relacion_precio_media), centers = 2)
 
-```{r}
-library(ggplot2)
+# Añadir los resultados del clustering al dataframe limpio
+zonas_clean$cluster <- kmeans_result$cluster
 
-# Gráfico de dispersión: Precio Medio vs Precio Ponderado Medio, coloreado por cluster
-ggplot(zonas, aes(x = ponderado_medio, y = precio_medio, color = factor(cluster))) +
-  geom_point(size = 3, alpha = 0.7) +  # Puntos
-  scale_color_manual(values = c("red", "blue")) +  # Personaliza colores
-  labs(title = "Precio Medio vs Precio Ponderado Medio por Cluster",
-       x = "Precio Ponderado Medio",
-       y = "Precio Medio",
-       color = "Cluster") +
+# Crear el gráfico de dispersión
+ggplot(zonas_clean, aes(x = precio_medio, y = ponderado_medio, color = as.factor(cluster))) +
+  geom_point(size = 3) +
+  labs(
+    title = "Comparación entre Precio Medio y Precio Ponderado Medio",
+    x = "Precio Medio",
+    y = "Precio Ponderado Medio",
+    color = "Cluster"
+  ) +
   theme_minimal()
-
 ```
+El gráfico de dispersión muestra la relación entre el precio medio y el precio ponderado medio de cada zona, diferenciadas por los dos clusters identificados.
 
-```{r}
+El Cluster 1 (color rojo) agrupa principalmente zonas con precios medios y ponderados más bajos o intermedios, y presenta una mayor dispersión entre ambas variables. Esto sugiere que estas zonas podrían tener una mayor variabilidad en características como superficie, estado del inmueble o demanda, lo cual influye en la diferencia entre el precio simple y el ponderado.
 
-```
+Por otro lado, el Cluster 2 (color azul) agrupa zonas donde tanto el precio medio como el ponderado tienden a ser más altos, y donde además los datos están más concentrados. Esto indica una mayor homogeneidad en esas zonas, posiblemente relacionadas con características comunes como buena ubicación, alta demanda o viviendas de calidad más uniforme.
+
+En conjunto, este análisis pone en evidencia que el precio ponderado medio añade valor explicativo respecto al precio medio simple, al incorporar otros factores que afectan el valor real del inmueble.
+
+Ahora observamos estos datos sobre un mapa:
 
 ```{r}
 # Cambiar el nombre de la columna 'old_name' a 'new_name'
-colnames(zonas)[colnames(zonas) == "neighbourhood_cleansed"] <- "nombre"
-library(dplyr)
+colnames(zonas_clean)[colnames(zonas_clean) == "neighbourhood_cleansed"] <- "nombre"
 
 # Unir el GeoJSON con el dataframe de zonas utilizando 'nombre_barrio'
-zonas_geojson <- left_join(barrios, zonas, by = "nombre")
+zonas_geojson <- left_join(barrios, zonas_clean, by = "nombre")
 head(zonas_geojson)
 
 ```
 ```{r}
-library(leaflet)
 
 # Definir los colores para los clusters
 pal <- colorFactor(c("red", "blue"), domain = c(1, 2))  # Ajusta los colores según tus clusters
@@ -331,22 +401,107 @@ leaflet(data = zonas_geojson) %>%
   )
 
 ```
+El mapa representa gráficamente cómo se distribuyen los clusters a nivel geográfico dentro del área de estudio.
+
+Las zonas clasificadas en el Cluster 2 (azul) se sitúan principalmente en áreas costeras o zonas céntricas de la ciudad, tradicionalmente asociadas a una mayor demanda y precios más elevados. Estas áreas destacan por su concentración y continuidad espacial, lo que refuerza la idea de que este cluster recoge zonas con características similares tanto en valor como en localización.
+
+En contraste, las zonas del Cluster 1 (rojo) se ubican mayoritariamente en áreas más periféricas o dispersas, donde los precios tienden a ser más bajos o variables. Este patrón geográfico respalda la validez del clustering, ya que refleja divisiones coherentes tanto en términos económicos como territoriales.
+
+El análisis de clustering realizado permite identificar claramente dos tipos de zonas diferenciadas por su comportamiento en precios. Esta segmentación resulta útil para posteriores análisis de mercado, estudios de accesibilidad a la vivienda o toma de decisiones urbanísticas y de inversión.
+
+La eliminación de valores atípicos ha sido clave para obtener clusters significativos y consistentes. Al reducir el ruido en los datos, el clustering refleja patrones reales del mercado, diferenciando claramente zonas con precios más altos y homogéneos frente a otras más variables o con precios más bajos. Esta limpieza mejora la calidad del análisis y su interpretación tanto estadística como geográfica.
+
+##ANÁLISIS PRECIO_PONDERADO
+Ahora se realiza un nuevo mapa de calor, pero esta vez con precio_ponderado:
+
 ```{r}
-head(barrios)
+
+# Calcular estadísticas por barrio
+precios_zona <- pisos_filtrados %>%
+  group_by(neighbourhood_cleansed) %>%
+  summarise(
+    media_ponderado = mean(precio_ponderado, na.rm = TRUE)
+  )
+
+# Unir los datos espaciales con los precios
+# Asegúrate de que el nombre de la columna en 'barrios' que contiene los nombres de los barrios coincida con 'neighbourhood_group_cleansed'
+# Por ejemplo, si la columna se llama 'nombre_barrio', ajusta el código así:
+barrios_precios <- barrios %>%
+  left_join(precios_zona, by = c("nombre" = "neighbourhood_cleansed"))
 ```
+
+
 ```{r}
-View(zonas)
+
+ggplot(data = barrios_precios) +
+  geom_sf(aes(fill = media_ponderado), 
+          color = "white", 
+          size = 0.3, 
+          show.legend = TRUE) +
+  scale_fill_viridis(
+    option = "plasma",
+    name = "€/noche",
+    na.value = "grey90",
+    direction = -1
+  ) +
+  coord_sf(expand = FALSE) +
+  labs(
+    title = "Precio medio de alojamiento por barrio (Valencia)",
+    subtitle = "Según datos de Airbnb",
+    caption = "Fuente: listings_final1.csv"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank()
+  )
 ```
-💡 Interpretación del gráfico
-En tu gráfico (Precio Medio vs Precio Ponderado Medio):
+Zonas costeras y céntricas (especialmente al este y sur del mapa) presentan precios medios más altos (colores púrpura/azul oscuro, >140€/noche). Esto sugiere que son áreas con mayor demanda turística o alojamientos de mayor calidad/precio.
 
-Zonas del Cluster 1 (rojo): centro y playa, tienen precios medios altos, pero están alineadas bastante bien con el precio ponderado, es decir, el alto precio se justifica por las características de los inmuebles.
+Zonas más periféricas o del interior (colores más amarillos y rosados) tienen precios más bajos (<100€/noche), lo que puede reflejar menor demanda, menor densidad turística o menos servicios.
 
-Zonas del Cluster 2 (azul): más dispersas, hay zonas con precio medio no tan alto, pero con precios ponderados más bajos o menos consistentes, lo que sugiere más variabilidad y menos relación clara entre calidad y precio.
+```{r}
 
-🤔 ¿Por qué podría pasar esto?
-En zonas como el centro o la playa, el mercado es más maduro y los precios suelen reflejar más consistentemente la calidad: lo caro suele ser caro por razones estructurales (más metros, mejor ubicación, etc.).
+pisos_filtrados %>%
+  group_by(pisos_filtrados$neighbourhood_group_cleansed, pisos_filtrados$neighbourhood_cleansed) %>%
+  summarise(
+    media = mean(precio_ponderado, na.rm = TRUE),
+    mediana = median(precio_ponderado, na.rm = TRUE),
+    sd = sd(precio_ponderado, na.rm = TRUE),
+    n = n()
+  ) %>%
+  arrange(desc(media))
+```
 
-En otras zonas puede haber más distorsión: por ejemplo, pisos antiguos con pocos servicios que aún así tienen precios altos por especulación o baja oferta.
 
+A pesar de estar fuera del centro urbano, la zona de Poblats del sud muestra precios medios de alojamiento significativamente altos. Esto resulta llamativo, dado que el modelo utilizado solo tiene en cuenta variables internas de los alojamientos (número de habitaciones, baños y capacidad), sin contemplar características externas como la ubicación o el entorno natural.
 
+Este comportamiento sugiere que el entorno geográfico o el atractivo turístico del área, como su cercanía a la Albufera y playas naturales, podría estar influyendo en los precios, incluso sin haber sido incluido explícitamente en el análisis.
+
+Este tipo de casos revela la importancia de la variable geográfica y sugiere que futuras versiones del modelo deberían considerar también factores espaciales y ambientales.
+
+Otro caso curioso sería Beniferri, que muestra precios medios elevados en comparación con otras zonas cercanas, a pesar de no estar en pleno centro ni tener un perfil turístico tan marcado como Ciutat Vella o Ruzafa.
+
+Teniendo en cuenta que el análisis solo se basa en variables internas del alojamiento (habitaciones, baños y capacidad), este resultado sugiere que en Beniferri podrían estar influyendo otros factores como:
+
+- Proximidad a zonas de negocios o sedes corporativas (por ejemplo, Palacio de Congresos).
+
+- Oferta de alojamientos modernos o de alta gama.
+
+- Buena conectividad y accesos, lo que puede resultar atractivo para cierto perfil de viajeros.
+
+Por último cabe destacar el caso de Malilla, aunque tradicionalmente ha sido un barrio residencial de clase media y algo más alejado del núcleo turístico, los precios medios de alojamiento son comparativamente altos en relación con barrios de perfil similar.
+
+Este resultado es especialmente llamativo dado que el modelo solo considera variables como número de baños, habitaciones y capacidad, lo que sugiere que en Malilla podrían estar influyendo factores como:
+
+- Su reciente transformación urbana (urbanizaciones nuevas, hospitales, zonas verdes).
+
+- Cercanía al Hospital La Fe, lo cual puede generar demanda puntual (familias, personal médico, etc.).
+
+- Atractivo para viajeros que buscan zonas tranquilas pero bien comunicadas.
+
+Este caso refuerza la idea de que los factores urbanísticos y la evolución de los barrios deben considerarse en futuros análisis.
