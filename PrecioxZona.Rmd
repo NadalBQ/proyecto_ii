@@ -13,7 +13,8 @@ knitr::opts_chunk$set(echo = TRUE)
 ##LECTURA DE DATOS
 Para realizar el estudio de precio de alquiler de airbnb por barrios se necesita el fichero obtenido a partir de la limpieza de listings (sin las reseñas)
 ```{r}
-pisos = read.csv("listings_valencia.csv", sep = ',')
+pisos = read.csv2("listings_valencia.csv", sep = ',')
+head(pisos)
 ```
 ##LIBRERÍAS
 Librerias que se van a utilizar:
@@ -45,6 +46,7 @@ pisos %>%
 ```
 
 Ahora se va mostrar un mapa de calor y gráficos boxplot para visualizar mejor el precio por barrio, pero antes hay que juntar dos archivos. El archivo geojson de la ciudad de valencia con el de listings, para poder visualizar los datos.
+
 ```{r}
 barrios <- st_read("valencia.geojson")  # Asegúrate de que el archivo esté en tu directorio de trabajo
 
@@ -255,12 +257,18 @@ pisos_filtrados %>%
 Ahora los barrios con alquileres más caros son bastante representativos así que no se va a realizar ninguna filtración más.
 
 ##PRECIO_PONDERADO
+
 Pero antes de realizar ningún estudio hay que tener en cuenta que la variable precio por si sola realmente no explica correctamente las diferencias de precios entre barrios, habría que crear una nueva variable ponderada por otras variables que también afecten al precio.
 
 En el dataset de listings solo se tienen las siguientes variables descriptivas de la vivienda: nº de habitaciones, nº de baños y acommodates, por lo que se va a realizar una regresión lineal para comprobar cuanto afecta cada variable respectivamente al precio(dollarPrice).
 
 ```{r}
-summary(lm(dollarPrice ~ bedrooms + bathrooms + accommodates, data = pisos_filtrados))
+pisos_filtrados$num_amenities <- sapply(pisos_filtrados$amenities, function(x) length(unlist(strsplit(as.character(x), ",\\s*"))))
+```
+
+
+```{r}
+summary(lm(dollarPrice ~ bedrooms + bathrooms + accommodates + num_amenities, data = pisos_filtrados))
 ```
 A partir de este modelo se observa que todas las variables son significativas (p-valor< 0.001), por lo que influyen en el precio. La variable bedrooms toma un valor de 9.49, es decir cada dormitorio extra aumenta el precio en promedio 9.49 dólares, manteniendo lo demás constante. La variable bathrooms toma un valor de	28.77	por lo que cada baño extra aumenta el precio en promedio 28.77 dólares, todo lo demás constante. Por último, la varible accommodates toma un valor de 13.81, cada persona adicional que puede alojarse aumenta el precio en promedio 13.81 dólares, todo lo demás igual.
 
@@ -315,7 +323,7 @@ En este caso, con el método de silhoutte, se determina que el nº óptimo de cl
 data_clean <- pisos_filtrados %>% filter(is.finite(peso))
 
 # Realizar el clustering con k=2
-kmeans_result <- kmeans(data_clean %>% select(peso), centers = 2)
+kmeans_result <- kmeans(data_clean %>% select(peso), centers = 3)
 
 # Añadir los resultados del clustering al dataframe limpio
 data_clean$cluster <- kmeans_result$cluster
@@ -335,12 +343,11 @@ El gráfico muestra que la limpieza ha sido adecuada y que el clustering tiene s
 
 Ahora se va a realizar lo mismo pero por zonas:
 ```{r}
-
 # Seleccionar la columna 'relacion_precio_media' para el clustering y eliminar filas con NA, NaN o Inf
 zonas_clean <- zonas %>% filter(is.finite(relacion_precio_media))
 
 # Realizar el clustering con k=2
-kmeans_result <- kmeans(zonas_clean %>% select(relacion_precio_media), centers = 2)
+kmeans_result <- kmeans(zonas_clean %>% select(relacion_precio_media), centers = 3)
 
 # Añadir los resultados del clustering al dataframe limpio
 zonas_clean$cluster <- kmeans_result$cluster
@@ -378,7 +385,7 @@ head(zonas_geojson)
 ```{r}
 
 # Definir los colores para los clusters
-pal <- colorFactor(c("red", "blue"), domain = c(1, 2))  # Ajusta los colores según tus clusters
+pal <- colorFactor(c("red", "blue","green"), domain = c(1, 2, 3))  # Ajusta los colores según tus clusters
 
 # Crear el mapa choropleth
 leaflet(data = zonas_geojson) %>%
