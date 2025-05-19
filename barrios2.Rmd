@@ -1,0 +1,510 @@
+---
+title: "Barrios"
+author: "Toni"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# LIBRERÍAS
+
+```{r message=FALSE, warning=FALSE}
+library(knitr)
+library(sf)
+library(dplyr)
+library(geosphere)
+library(leaflet)
+library(tidyr)
+library(ggplot2)
+library(car)
+```
+
+# CARGA Y CREACIÓN DE FICHEROS
+
+Para continuar con el proyecto se han obtenido nuevas bases de datos para añadir información sobre los barrios y poder agrupar los barrios en función de como afectan estas nuevas variables al precio ponderado obtenido anteriormente.
+
+Se han obtenido 3 nuevos datasets, uno de transporte público por barrio, obtenido de la página del ayuntamiento, otro de renta media obtenido en la página del INE y otro de distancias a lugares de interés que se ha obtenido calculando las distancias a partir del fichero geojson de valencia y las coordenadas de cada lugar.
+
+Primero se procederá a leer los archivos de pisos del estudio anterior y transporte:
+```{r pisos y transporte}
+pisos = read.csv('pisos_limpios.csv', sep =',')
+transporte = read.csv('transporte.csv', sep = ';')
+```
+
+A continuación se va a calcular los centroides de cada barrio a partir del geojson para así poder calcular la distancia exacta del centro del barrio al lugar de interés:
+
+```{r centroides barrios}
+# Cargar el geojson
+barrios <- st_read("valencia.geojson")
+
+# Obtener centroides de los polígonos
+barrios_centroides <- barrios %>% 
+  mutate(centroide = st_centroid(geometry)) %>%
+  mutate(lon = st_coordinates(centroide)[,1],
+         lat = st_coordinates(centroide)[,2])
+
+```
+Ahora se crea un nuevo fichero con los puntos clave que se han elegido para el estudio:
+
+```{r lugares de interés}
+# Lista de puntos clave con nombre, latitud y longitud
+puntos_clave <- data.frame(
+  nombre = c("Plaza_Ayuntamiento", "CAC", "Bioparc", "Estacion_Norte", 
+             "Playa_Malvarrosa", "Torres_Serranos", "Universitat", 
+             "Puerto", "Albufera", "Viveros", "Parque_Cabecera", 'UPV', "Mestalla"),
+  lat = c(39.4699, 39.4554, 39.4781, 39.4652, 
+          39.4831, 39.4793, 39.4754, 
+          39.4515, 39.3331, 39.4818, 39.4747, 39.4823, 39.4748),
+  lon = c(-0.3763, -0.3537, -0.4008, -0.3767, 
+          -0.3282, -0.3758, -0.3445, 
+          -0.3160, -0.3356, -0.3677, -0.4083, -0.3435, -0.3574)
+)
+```
+
+Para comprobar que las coordenadas son correctas se muestran en un mapa:
+
+```{r mapa lugares}
+
+lugares_sf <- st_as_sf(puntos_clave, coords = c("lon", "lat"), crs = 4326)
+
+# 4. Crear mapa interactivo
+leaflet() %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addPolygons(data = barrios, 
+              color = "#444444", 
+              weight = 1, 
+              fillOpacity = 0.3,
+              label = ~as.character(nombre),  # o el campo correcto para nombre de barrio
+              highlightOptions = highlightOptions(weight = 2, color = "blue", fillOpacity = 0.5)) %>%
+  addCircleMarkers(data = lugares_sf, 
+                   radius = 6, 
+                   color = "red", 
+                   fillOpacity = 0.9,
+                   label = ~nombre,
+                   popup = ~nombre)
+
+```
+
+Efectivamente cada lugar se muestra donde corresponde por lo que se puede continuar con el estudio.
+  
+Finalmente se calculan las distancias en km para cada barrio a cada punto de interés mediante la función distHaversine y se crea el nuevo dataset de distancias:
+
+```{r distancias}
+# Función para calcular distancia entre dos coordenadas
+calcular_distancias <- function(lat_barrio, lon_barrio, puntos) {
+  distHaversine(matrix(c(lon_barrio, lat_barrio), ncol = 2), 
+                matrix(c(puntos$lon, puntos$lat), ncol = 2)) / 1000  # en km
+}
+
+# Añadir distancias al dataframe de barrios
+distancias <- barrios_centroides %>%
+  rowwise() %>%
+  mutate(across(c(lat, lon), as.numeric)) %>%
+  mutate(
+    distancia_P_Ayuntamiento = calcular_distancias(lat, lon, puntos_clave[1,]),
+    distancia_CAC           = calcular_distancias(lat, lon, puntos_clave[2,]),
+    distancia_Bioparc       = calcular_distancias(lat, lon, puntos_clave[3,]),
+    distancia_Estacion      = calcular_distancias(lat, lon, puntos_clave[4,]),
+    distancia_Malvarrosa    = calcular_distancias(lat, lon, puntos_clave[5,]),
+    distancia_Torres        = calcular_distancias(lat, lon, puntos_clave[6,]),
+    distancia_UV   = calcular_distancias(lat, lon, puntos_clave[7,]),
+    distancia_Puerto        = calcular_distancias(lat, lon, puntos_clave[8,]),
+    distancia_Albufera      = calcular_distancias(lat, lon, puntos_clave[9,]),
+    distancia_Viveros      = calcular_distancias(lat, lon, puntos_clave[10,]),
+    distancia_Cabecera      = calcular_distancias(lat, lon, puntos_clave[11,]),
+    distancia_UPV      = calcular_distancias(lat, lon, puntos_clave[12,]),
+    distancia_Mestalla = calcular_distancias(lat, lon, puntos_clave[13,])
+  ) %>%
+  ungroup()
+```
+
+Como en el fichero hay variables no deseadas del geojson se filtra para que sea más cómodo de usar:
+
+```{r filtrar distancias}
+distancias_filtrado = distancias %>% select(nombre, distancia_P_Ayuntamiento:last_col())
+```
+
+```{r distancias final}
+distancias_f <- st_drop_geometry(distancias_filtrado)
+```
+
+Una vez obtenidas las distancias, se carga el fichero de renta media:
+
+```{r renta}
+renta_media = read.csv("ineValenciafinal.csv", sep =";")
+head(renta_media)
+```
+
+# DATASET BARRIOS
+
+En este apartado se procede a la creación del dataset final de barrios, primero se va a juntar la información del dataset pisos con el de distancias, para ello, como se va a juntar por barrio, se comprueba si algún barrio presente en pisos no se encuentra en distancias:
+
+```{r dif pisos y distancias}
+setdiff(unique(pisos$neighbourhood_cleansed), unique(distancias_f$nombre)
+)
+```
+
+Se muestra el barrio Mont-Olivet, vamos a ver si realmente no se encuentra en distancias:
+
+```{r barrios distancias}
+unique(distancias_f$nombre)
+```
+
+Se puede observar que si se encuentra en el fichero, solo que en el de pisos es MONT-OLIVET y en el de distancias es MONTOLIVET, por lo que se le añade el guión:
+
+```{r cambio de nombre}
+distancias_f$nombre[distancias_f$nombre == "MONTOLIVET"] <- "MONT-OLIVET"
+```
+
+Ahora sí se pueden juntar ambos ficheros, pero antes creamos el fichero barrios_info con la variable barrio y la media de la variable precio_ponderado por cada barrio. Como la variable precio_ponderado daba problemas al estar indicada como carácter, se convierte en numérica y así poder calcular la media:
+
+```{r precio ponderado barrios}
+# Paso 3: cambiar coma decimal por punto
+pisos$precio_ponderado <- gsub(",", ".", pisos$precio_ponderado)
+
+# Paso 4: convertir a numérico
+pisos$precio_ponderado <- as.numeric(pisos$precio_ponderado)
+
+barrios_info <- pisos %>%
+  group_by(neighbourhood_group_cleansed, neighbourhood_cleansed) %>%
+  summarise(
+    media = mean(precio_ponderado, na.rm = TRUE)
+  ) %>%
+  arrange(desc(media))
+```
+
+A continuación le añadimos las distancias:
+
+```{r join barriosxdistancias}
+barrios_info <- barrios_info %>%
+  left_join(distancias_f, by = c("neighbourhood_cleansed" = "nombre"))
+```
+
+Se realiza el mismo procedimiento con el fichero transporte, se comprueba si algún barrio no está presente en transportes:
+
+```{r dif barrios transporte}
+setdiff(unique(barrios_info$neighbourhood_cleansed), unique(transporte$nombre))
+```
+
+Como todos los barrios están presentes, se unen ambos ficheros con las variables que se desean usar de transporte y se eliminan los ausentes:
+
+```{r transporte resumen}
+transporte_clean <- transporte %>%
+  filter(!is.na(transporte) & transporte != "")  # elimina filas sin tipo transporte
+
+transporte_resumen <- transporte_clean %>%
+  group_by(nombre, codbarrio, coddistrit, transporte) %>%
+  summarise(conteo = n(), .groups = "drop") %>%
+  pivot_wider(
+    names_from = transporte,
+    values_from = conteo,
+    values_fill = 0
+  )
+```
+
+```{r join barriosxtransporte}
+barrios_info <- barrios_info %>%
+  left_join(transporte_resumen, by = c("neighbourhood_cleansed" = "nombre"))
+```
+
+Por último se va a proceder a juntar el fichero de renta_media, como en este los nombres de barrios no coinciden con el fichero de barrios hay que juntarlo de otra forma. Con el fichero de transporte se han unido las variables codbarrio y coddistrit, también presentes en renta_media, para ver si coinciden se comprueba si algún par (distrito, barrio) en renta_media no está presente en barrio_info:
+
+```{r pares únicos}
+# Pairs únicos en barrios_info
+pares_barrios_info <- barrios_info %>%
+  select(coddistrit, codbarrio) %>%
+  distinct()
+
+# Pairs únicos en renta_media (ajusta nombres según tu dataset)
+pares_renta_media <- renta_media %>%
+  select(Codigo_Distrito, Codigo_Barrio) %>%
+  distinct()
+```
+
+```{r diferencias}
+diferencias <- anti_join(pares_barrios_info, pares_renta_media,
+                         by = c("coddistrit" = "Codigo_Distrito", 
+                                "codbarrio" = "Codigo_Barrio"))
+head(diferencias)
+```
+
+Como no hay ninguna diferencia se pueden juntar sin problema ambas bases de datos con las variables de renta_media que se desean:
+
+```{r join barriosxrenta}
+renta_media_seleccion <- renta_media %>%
+  group_by(Codigo_Distrito, Codigo_Barrio) %>%
+  summarise(
+    X2022_persona = mean(X2022_persona, na.rm = TRUE),
+    X2022_hogar = mean(X2022_hogar, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+barrios_info <- barrios_info %>%
+  left_join(renta_media_seleccion, by = c("coddistrit" = "Codigo_Distrito", 
+                                          "codbarrio" = "Codigo_Barrio"))
+
+```
+
+Finalmente se cambian los nombres del fichero por otros más orientativos:
+
+```{r cambio nombres}
+barrios_info <- barrios_info %>%
+  rename(
+    distrito = neighbourhood_group_cleansed,
+    barrio = neighbourhood_cleansed,
+    precio = media,
+    coddistrito = coddistrit,
+    renta_persona = X2022_persona,
+    renta_hogar = X2022_hogar
+  )
+
+head(barrios_info)
+```
+
+
+Ahora ya se puede continuar con el estudio de agrupamiento de barrios.
+
+# INFLUENCIA DE LAS NUEVAS VARIABLES EN EL PRECIO PONDERADO
+
+Escalamos los datos para interpretar 
+
+```{r escalar}
+# Escalar las variables numéricas
+barrios_scaled <- scale(barrios_info[, !(names(barrios_info) %in% c("distrito", "barrio", "codbarrio", "coddistrito"))])
+barrios_scaled <- as.data.frame(barrios_scaled)
+```
+
+
+```{r modelo lineal}
+modelo <- lm(precio ~ distancia_P_Ayuntamiento + distancia_CAC + distancia_Bioparc + distancia_Estacion + distancia_Malvarrosa + distancia_Torres + distancia_UV + distancia_Puerto + distancia_Albufera + distancia_Viveros + distancia_Cabecera + distancia_UPV + distancia_Mestalla + emt + metrovlc + renta_persona + renta_hogar , data = barrios_scaled)
+summary(modelo)
+```
+El modelo no sale como pensamos. Pensamos que la distancia a la Plaza Ayuntamiento sería importante para los turistas y aquí no la es. Vamos a investigar porque los datos no ajustan bien a la regresión, empezando ver las distribuciones de las variables. 
+
+```{r distribuciones var}
+
+barrios_scaled_dist <- barrios_scaled %>%
+  select(precio, distancia_P_Ayuntamiento, distancia_CAC, distancia_Bioparc, distancia_Estacion,
+         distancia_Malvarrosa, distancia_Torres, distancia_UV, distancia_Puerto, distancia_Albufera,
+         distancia_Viveros, distancia_Cabecera, distancia_UPV, distancia_Mestalla, emt, metrovlc,
+         renta_persona, renta_hogar) %>%
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "value")
+
+# Plot histograms
+ggplot(barrios_scaled_dist, aes(x = value)) +
+  geom_histogram(bins = 30, fill = "steelblue", color = "white") +
+  facet_wrap(~ variable, scales = "free") +
+  theme_minimal() +
+  labs(title = "Distributions of Variables", x = "", y = "Count")
+
+```
+
+Muchas variables no siguen una distribución normal. Transformamos el data usando el logaritmo para ver si podemos acercar más a una distribución normal.
+
+```{r transformar log}
+barrios_log <- barrios_scaled %>%
+  filter(across(
+    c(precio, distancia_P_Ayuntamiento, distancia_CAC, distancia_Bioparc, distancia_Estacion,
+      distancia_Malvarrosa, distancia_Torres, distancia_UV, distancia_Puerto, distancia_Albufera,
+      distancia_Viveros, distancia_Cabecera, distancia_UPV, distancia_Mestalla, emt, metrovlc,
+      renta_persona, renta_hogar),
+    ~ . > -1
+  )) %>%
+  mutate(across(
+    everything(),
+    ~ log(. + 1)
+  ))
+```
+
+```{r modelo log}
+modelo_log <- lm(precio ~ distancia_P_Ayuntamiento + distancia_CAC + distancia_Bioparc + distancia_Estacion + distancia_Malvarrosa + distancia_Torres + distancia_UV + distancia_Puerto + distancia_Albufera + distancia_Viveros + distancia_Cabecera + distancia_UPV + distancia_Mestalla + emt + metrovlc + renta_persona + renta_hogar , data = barrios_log)
+summary(modelo_log)
+```
+
+```{r distribuciones log}
+barrios_scaled_long_log <- barrios_log %>%
+  select(precio, distancia_P_Ayuntamiento, distancia_CAC, distancia_Bioparc, distancia_Estacion,
+         distancia_Malvarrosa, distancia_Torres, distancia_UV, distancia_Puerto, distancia_Albufera,
+         distancia_Viveros, distancia_Cabecera, distancia_UPV, distancia_Mestalla, emt, metrovlc,
+         renta_persona, renta_hogar) %>%
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "value")
+
+# Plot histograms
+ggplot(barrios_scaled_long_log, aes(x = value)) +
+  geom_histogram(bins = 30, fill = "steelblue", color = "white") +
+  facet_wrap(~ variable, scales = "free") +
+  theme_minimal() +
+  labs(title = "Distributions of Variables", x = "", y = "Count")
+```
+
+Vemos que el modelo es mucho peor que el anterior. Veando las distribuciones tampoco siguen una distribución normal. 
+
+Vamos a ver si los residuos son normales. 
+
+```{r}
+plot(modelo$fitted.values, resid(modelo))
+```
+
+Tiene una forma de nube entonces los residuos siguen una distribución normal y el problema no es este.
+Comprobamos si hay multicolinealidad o no.
+
+```{r correlaciones}
+cor_matrix <- cor(barrios_scaled)
+cor_matrix
+```
+
+El problema es este. Hay muchas variables muy correlacionadas entre sí que está afectando el modelo. Vamos a ver el factor de inflación de la varianza (VIF). Si hay números más de 10, tenemos un grave problema. 
+
+```{r vif}
+vif(modelo)
+```
+
+## PCA
+
+```{r pca}
+library(FactoMineR)
+library(factoextra)
+res.pca = PCA(barrios_scaled, scale.unit = FALSE, graph = FALSE, ncp = 10)
+eig.val <- get_eigenvalue(res.pca)
+VPmedio = 100 * (1/nrow(eig.val))
+fviz_eig(res.pca, addlabels = TRUE) +
+  geom_hline(yintercept=VPmedio, linetype=2, color="red")
+kable(eig.val[1:6,])
+K = 4
+res.pca = PCA(barrios_scaled, scale.unit = FALSE, graph = FALSE, ncp = K)
+```
+
+```{r}
+# Gráfico T2 Hotelling
+misScores = res.pca$ind$coord[,1:K]
+miT2 = colSums(t(misScores**2)/eig.val[1:K,1])
+I = nrow(barrios_scaled)
+F95 = K*(I**2 - 1)/(I*(I - K)) * qf(0.95, K, I-K)
+F99 = K*(I**2 - 1)/(I*(I - K)) * qf(0.99, K, I-K)
+
+plot(1:length(miT2), miT2, type = "p", xlab = "Barrios", ylab = "T2")
+abline(h = F95, col = "orange", lty = 2, lwd = 2)
+abline(h = F99, col = "red3", lty = 2, lwd = 2)
+anomalas = which(miT2 > F95)
+anomalas
+
+# Score plots
+library(grid)
+library(gridExtra)
+
+
+p1 = fviz_pca_ind(res.pca, axes = c(1,2), geom = c("point"),
+                  habillage = factor(miT2 > F95)) +
+  tune::coord_obs_pred()
+
+p2 = fviz_pca_ind(res.pca, axes = c(1,3), geom = c("point"), 
+                  habillage = factor(miT2 > F95)) +
+  tune::coord_obs_pred() 
+  
+
+grid.arrange(p1,p2, nrow = 1)
+```
+
+```{r}
+fviz_pca_var(res.pca, axes = c(1,2), repel = TRUE, col.var = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"))
+fviz_pca_var(res.pca, axes = c(3,4), repel = TRUE, col.var = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"))
+```
+
+```{r}
+fviz_contrib(res.pca, choice = "var", axes = 1)
+```
+
+
+
+
+# PLS
+
+```{r}
+library(pls)
+X <- barrios_scaled %>%
+  select(-precio)  # remove the target from predictors
+
+y <- barrios_scaled$precio
+
+pls_model <- plsr(y ~ ., data = X, scale = FALSE, validation = "CV")
+```
+
+```{r}
+validationplot(pls_model, val.type = "MSEP")
+```
+
+```{r}
+predictions <- predict(pls_model, ncomp = 3) 
+summary(pls_model)
+plot(RMSEP(pls_model))
+```
+
+```{r}
+loadings <- pls_model$loading.weights[, 1:3]  # weights for first 3 components
+print(loadings)
+```
+
+```{r}
+library(plsVarSel)
+
+VIP <- function(pls_model) {
+  # Get components and original data
+  T <- pls_model$scores
+  P <- pls_model$loadings
+  W <- pls_model$loading.weights
+  Y <- pls_model$Yloadings
+  ncomp <- pls_model$ncomp
+  
+  # Calculate VIP scores
+  SS <- drop(Y^2)  # sum of squares for each component
+  Wnorm2 <- apply(W^2, 2, sum)
+  SSW <- sweep(W^2, 2, SS / Wnorm2, "*")
+  VIP <- sqrt(ncol(W) * rowSums(SSW) / sum(SS))
+  names(VIP) <- rownames(W)
+  return(VIP)
+}
+
+vip_scores <- VIP(pls_model)
+sort(vip_scores, decreasing = TRUE)
+```
+
+```{r}
+vip_df <- data.frame(
+  variable = names(vip_scores),
+  VIP = vip_scores
+)
+
+ggplot(vip_df, aes(x = reorder(variable, VIP), y = VIP)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red") +
+  labs(
+    title = "Variable Importance (VIP) for Predicting Precio",
+    x = "Predictor Variable",
+    y = "VIP Score"
+  ) +
+  theme_minimal()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Agrupaciones de barrios (clusterización)
+
+
