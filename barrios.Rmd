@@ -8,6 +8,7 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+
 # LIBRERÍAS
 ```{r}
 library(sf)
@@ -17,6 +18,7 @@ library(leaflet)
 ```
 
 # CARGA Y CREACIÓN DE FICHEROS
+
 Para continuar con el proyecto se han obtenido nuevas bases de datos para añadir información sobre los barrios y poder agrupar los barrios en función de como afectan estas nuevas variables al precio ponderado obtenido anteriormente.
 
 Se han obtenido 3 nuevos datasets, uno de transporte público por barrio, obtenido de la página del ayuntamiento, otro de renta media obtenido en la página del INE y otro de distancias a lugares de interés que se ha obtenido calculando las distancias a partir del fichero geojson de valencia y las coordenadas de cada lugar.
@@ -28,6 +30,7 @@ transporte = read.csv('transporte.csv', sep = ';')
 ```
 
 A continuación se va a calcular los centroides de cada barrio a partir del geojson para así poder calcular la distancia exacta del centro del barrio al lugar de interés:
+
 ```{r centroides barrios}
 # Cargar el geojson
 barrios <- st_read("valencia.geojson")
@@ -77,7 +80,8 @@ leaflet() %>%
                    popup = ~nombre)
 
 ```
-  Efectivamente cada lugar se muestra donde corresponde por lo que se puede continuar con el estudio.
+
+Efectivamente cada lugar se muestra donde corresponde por lo que se puede continuar con el estudio.
   
 Finalmente se calculan las distancias en km para cada barrio a cada punto de interés mediante la función distHaversine y se crea el nuevo dataset de distancias:
 ```{r distancias}
@@ -247,4 +251,38 @@ head(barrios_info)
 Ahora ya se puede continuar con el estudio de agrupamiento de barrios.
 
 # INFLUENCIA DE LAS NUEVAS VARIABLES EN EL PRECIO PONDERADO
+
+Escalamos los datos para interpretar 
+
+```{r}
+# Escalar las variables numéricas
+barrios_scaled <- scale(barrios_info[, !(names(barrios_info) %in% c("distrito", "barrio", "codbarrio", "coddistrito"))])
+barrios_scaled <- as.data.frame(barrios_scaled)
+```
+
+
+```{r}
+modelo <- lm(precio ~ distancia_P_Ayuntamiento + distancia_CAC + distancia_Bioparc + distancia_Estacion + distancia_Malvarrosa + distancia_Torres + distancia_UV + distancia_Puerto + distancia_Albufera + distancia_Viveros + distancia_Cabecera + distancia_UPV + distancia_Mestalla + emt + metrovlc + renta_persona + renta_hogar , data = barrios_scaled)
+summary(modelo)
+```
+```{r}
+barrios_log <- barrios_scaled %>%
+  mutate(across(c(precio, distancia_P_Ayuntamiento, distancia_CAC, distancia_Bioparc, distancia_Estacion, distancia_Malvarrosa, distancia_Torres, distancia_UV, distancia_Puerto, distancia_Albufera, distancia_Viveros, distancia_Cabecera, distancia_UPV, distancia_Mestalla, emt, metrovlc, renta_persona, renta_hogar), ~ log(. + 1)))
+```
+```{r}
+modelo_log <- lm(precio ~ distancia_P_Ayuntamiento + distancia_CAC + distancia_Bioparc + distancia_Estacion + distancia_Malvarrosa + distancia_Torres + distancia_UV + distancia_Puerto + distancia_Albufera + distancia_Viveros + distancia_Cabecera + distancia_UPV + distancia_Mestalla + emt + metrovlc + renta_persona + renta_hogar , data = barrios_log)
+summary(modelo_log)
+```
+
+
+
+
+
+
+
+
+
+
+## Agrupaciones de barrios (clusterización)
+
 
