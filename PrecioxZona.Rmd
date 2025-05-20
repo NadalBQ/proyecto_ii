@@ -341,7 +341,6 @@ Existen atípicos en los barrios, por lo que liminamos los atípicos de cada bar
 ```{r eliminar atipicos cada barrio}
 
 pisos_limpios <- pisos_filtrados %>%
-  group_by(neighbourhood_cleansed) %>%
   filter(
     precio_ponderado > quantile(precio_ponderado, 0.25) - 1.5 * IQR(precio_ponderado) &
     precio_ponderado < quantile(precio_ponderado, 0.75) + 1.5 * IQR(precio_ponderado)
@@ -434,9 +433,13 @@ ggplot(zonas_clean, aes(x = precio_medio, y = ponderado_medio, color = as.factor
 ```
 El gráfico de dispersión muestra la relación entre el precio medio y el precio ponderado medio de cada zona, diferenciadas por los dos clusters identificados.
 
-El Cluster 1 (color rojo) agrupa principalmente zonas con precios medios y ponderados más bajos o intermedios, y presenta una mayor dispersión entre ambas variables. Esto sugiere que estas zonas podrían tener una mayor variabilidad en características como superficie, estado del inmueble o demanda, lo cual influye en la diferencia entre el precio simple y el ponderado.
+Este análisis sugiere que los barrios pueden agruparse en tres perfiles según el precio medio y ponderado:
 
-Por otro lado, el Cluster 2 (color azul) agrupa zonas donde tanto el precio medio como el ponderado tienden a ser más altos, y donde además los datos están más concentrados. Esto indica una mayor homogeneidad en esas zonas, posiblemente relacionadas con características comunes como buena ubicación, alta demanda o viviendas de calidad más uniforme.
+Un grupo central y estable (rojo),
+
+Un grupo más disperso o atípico (verde),
+
+Y un grupo ligeramente más barato (azul).
 
 En conjunto, este análisis pone en evidencia que el precio ponderado medio añade valor explicativo respecto al precio medio simple, al incorporar otros factores que afectan el valor real del inmueble.
 
@@ -480,9 +483,13 @@ leaflet(data = zonas_geojson) %>%
 
 El mapa representa gráficamente cómo se distribuyen los clusters a nivel geográfico dentro del área de estudio.
 
-Las zonas clasificadas en el Cluster 2 (azul) se sitúan principalmente en áreas costeras o zonas céntricas de la ciudad, tradicionalmente asociadas a una mayor demanda y precios más elevados. Estas áreas destacan por su concentración y continuidad espacial, lo que refuerza la idea de que este cluster recoge zonas con características similares tanto en valor como en localización.
+Este mapa permite ver de forma clara la distribución espacial de los clusters:
 
-En contraste, las zonas del Cluster 1 (rojo) se ubican mayoritariamente en áreas más periféricas o dispersas, donde los precios tienden a ser más bajos o variables. Este patrón geográfico respalda la validez del clustering, ya que refleja divisiones coherentes tanto en términos económicos como territoriales.
+Cluster 1 (Rojo): Barrios urbanos, consolidados, con precios más equilibrados.
+
+Cluster 2 (Azul): Barrios intermedios en transición o de clase media.
+
+Cluster 3 (Verde): Barrios periféricos, turísticos o menos homogéneos.
 
 El análisis de clustering realizado permite identificar claramente dos tipos de zonas diferenciadas por su comportamiento en precios. Esta segmentación resulta útil para posteriores análisis de mercado, estudios de accesibilidad a la vivienda o toma de decisiones urbanísticas y de inversión.
 
