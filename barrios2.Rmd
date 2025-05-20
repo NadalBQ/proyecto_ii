@@ -20,6 +20,14 @@ library(leaflet)
 library(tidyr)
 library(ggplot2)
 library(car)
+library(grid)
+library(gridExtra)
+library(pls)
+library(cluster)
+library(FactoMineR)
+library(factoextra)
+library(NbClust)
+library(clValid)
 ```
 
 # CARGA Y CREACIÓN DE FICHEROS
@@ -54,13 +62,13 @@ Ahora se crea un nuevo fichero con los puntos clave que se han elegido para el e
 puntos_clave <- data.frame(
   nombre = c("Plaza_Ayuntamiento", "CAC", "Bioparc", "Estacion_Norte", 
              "Playa_Malvarrosa", "Torres_Serranos", "Universitat", 
-             "Puerto", "Albufera", "Viveros", "Parque_Cabecera", 'UPV', "Mestalla"),
+             "Puerto", "Albufera", "Viveros", 'UPV', "Mestalla"),
   lat = c(39.4699, 39.4554, 39.4781, 39.4652, 
           39.4831, 39.4793, 39.4754, 
-          39.4515, 39.3331, 39.4818, 39.4747, 39.4823, 39.4748),
+          39.4515, 39.3331, 39.4818, 39.4823, 39.4748),
   lon = c(-0.3763, -0.3537, -0.4008, -0.3767, 
           -0.3282, -0.3758, -0.3445, 
-          -0.3160, -0.3356, -0.3677, -0.4083, -0.3435, -0.3574)
+          -0.3160, -0.3356, -0.3677, -0.3435, -0.3574)
 )
 ```
 
@@ -114,9 +122,8 @@ distancias <- barrios_centroides %>%
     distancia_Puerto        = calcular_distancias(lat, lon, puntos_clave[8,]),
     distancia_Albufera      = calcular_distancias(lat, lon, puntos_clave[9,]),
     distancia_Viveros      = calcular_distancias(lat, lon, puntos_clave[10,]),
-    distancia_Cabecera      = calcular_distancias(lat, lon, puntos_clave[11,]),
-    distancia_UPV      = calcular_distancias(lat, lon, puntos_clave[12,]),
-    distancia_Mestalla = calcular_distancias(lat, lon, puntos_clave[13,])
+    distancia_UPV      = calcular_distancias(lat, lon, puntos_clave[11,]),
+    distancia_Mestalla = calcular_distancias(lat, lon, puntos_clave[12,])
   ) %>%
   ungroup()
 ```
@@ -237,7 +244,6 @@ Como no hay ninguna diferencia se pueden juntar sin problema ambas bases de dato
 renta_media_seleccion <- renta_media %>%
   group_by(Codigo_Distrito, Codigo_Barrio) %>%
   summarise(
-    X2022_persona = mean(X2022_persona, na.rm = TRUE),
     X2022_hogar = mean(X2022_hogar, na.rm = TRUE)
   ) %>%
   ungroup()
@@ -257,7 +263,6 @@ barrios_info <- barrios_info %>%
     barrio = neighbourhood_cleansed,
     precio = media,
     coddistrito = coddistrit,
-    renta_persona = X2022_persona,
     renta_hogar = X2022_hogar
   )
 
@@ -275,11 +280,12 @@ Escalamos los datos para interpretar
 # Escalar las variables numéricas
 barrios_scaled <- scale(barrios_info[, !(names(barrios_info) %in% c("distrito", "barrio", "codbarrio", "coddistrito"))])
 barrios_scaled <- as.data.frame(barrios_scaled)
+
 ```
 
 
 ```{r modelo lineal}
-modelo <- lm(precio ~ distancia_P_Ayuntamiento + distancia_CAC + distancia_Bioparc + distancia_Estacion + distancia_Malvarrosa + distancia_Torres + distancia_UV + distancia_Puerto + distancia_Albufera + distancia_Viveros + distancia_Cabecera + distancia_UPV + distancia_Mestalla + emt + metrovlc + renta_persona + renta_hogar , data = barrios_scaled)
+modelo <- lm(precio ~ distancia_P_Ayuntamiento + distancia_CAC + distancia_Bioparc + distancia_Estacion + distancia_Malvarrosa + distancia_Torres + distancia_UV + distancia_Puerto + distancia_Albufera + distancia_Viveros + distancia_UPV + distancia_Mestalla + emt + metrovlc + renta_hogar , data = barrios_scaled)
 summary(modelo)
 ```
 El modelo no sale como pensamos. Pensamos que la distancia a la Plaza Ayuntamiento sería importante para los turistas y aquí no la es. Vamos a investigar porque los datos no ajustan bien a la regresión, empezando ver las distribuciones de las variables. 
@@ -289,8 +295,8 @@ El modelo no sale como pensamos. Pensamos que la distancia a la Plaza Ayuntamien
 barrios_scaled_dist <- barrios_scaled %>%
   select(precio, distancia_P_Ayuntamiento, distancia_CAC, distancia_Bioparc, distancia_Estacion,
          distancia_Malvarrosa, distancia_Torres, distancia_UV, distancia_Puerto, distancia_Albufera,
-         distancia_Viveros, distancia_Cabecera, distancia_UPV, distancia_Mestalla, emt, metrovlc,
-         renta_persona, renta_hogar) %>%
+         distancia_Viveros, distancia_UPV, distancia_Mestalla, emt, metrovlc,
+         renta_hogar) %>%
   pivot_longer(cols = everything(), names_to = "variable", values_to = "value")
 
 # Plot histograms
@@ -309,8 +315,8 @@ barrios_log <- barrios_scaled %>%
   filter(across(
     c(precio, distancia_P_Ayuntamiento, distancia_CAC, distancia_Bioparc, distancia_Estacion,
       distancia_Malvarrosa, distancia_Torres, distancia_UV, distancia_Puerto, distancia_Albufera,
-      distancia_Viveros, distancia_Cabecera, distancia_UPV, distancia_Mestalla, emt, metrovlc,
-      renta_persona, renta_hogar),
+      distancia_Viveros, distancia_UPV, distancia_Mestalla, emt, metrovlc,
+      renta_hogar),
     ~ . > -1
   )) %>%
   mutate(across(
@@ -320,7 +326,7 @@ barrios_log <- barrios_scaled %>%
 ```
 
 ```{r modelo log}
-modelo_log <- lm(precio ~ distancia_P_Ayuntamiento + distancia_CAC + distancia_Bioparc + distancia_Estacion + distancia_Malvarrosa + distancia_Torres + distancia_UV + distancia_Puerto + distancia_Albufera + distancia_Viveros + distancia_Cabecera + distancia_UPV + distancia_Mestalla + emt + metrovlc + renta_persona + renta_hogar , data = barrios_log)
+modelo_log <- lm(precio ~ distancia_P_Ayuntamiento + distancia_CAC + distancia_Bioparc + distancia_Estacion + distancia_Malvarrosa + distancia_Torres + distancia_UV + distancia_Puerto + distancia_Albufera + distancia_Viveros + distancia_UPV + distancia_Mestalla + emt + metrovlc + renta_hogar , data = barrios_log)
 summary(modelo_log)
 ```
 
@@ -328,8 +334,8 @@ summary(modelo_log)
 barrios_scaled_long_log <- barrios_log %>%
   select(precio, distancia_P_Ayuntamiento, distancia_CAC, distancia_Bioparc, distancia_Estacion,
          distancia_Malvarrosa, distancia_Torres, distancia_UV, distancia_Puerto, distancia_Albufera,
-         distancia_Viveros, distancia_Cabecera, distancia_UPV, distancia_Mestalla, emt, metrovlc,
-         renta_persona, renta_hogar) %>%
+         distancia_Viveros, distancia_UPV, distancia_Mestalla, emt, metrovlc,
+         renta_hogar) %>%
   pivot_longer(cols = everything(), names_to = "variable", values_to = "value")
 
 # Plot histograms
@@ -344,7 +350,7 @@ Vemos que el modelo es mucho peor que el anterior. Veando las distribuciones tam
 
 Vamos a ver si los residuos son normales. 
 
-```{r}
+```{r residuos}
 plot(modelo$fitted.values, resid(modelo))
 ```
 
@@ -365,19 +371,18 @@ vif(modelo)
 ## PCA
 
 ```{r pca}
-library(FactoMineR)
-library(factoextra)
-res.pca = PCA(barrios_scaled, scale.unit = FALSE, graph = FALSE, ncp = 10)
+barrios_scaled_sinprecio <- subset(barrios_scaled, select = -c(precio))
+res.pca = PCA(barrios_scaled_sinprecio, scale.unit = FALSE, graph = FALSE, ncp = 10)
 eig.val <- get_eigenvalue(res.pca)
 VPmedio = 100 * (1/nrow(eig.val))
 fviz_eig(res.pca, addlabels = TRUE) +
   geom_hline(yintercept=VPmedio, linetype=2, color="red")
 kable(eig.val[1:6,])
-K = 4
-res.pca = PCA(barrios_scaled, scale.unit = FALSE, graph = FALSE, ncp = K)
+K = 3
+res.pca = PCA(barrios_scaled_sinprecio, scale.unit = FALSE, graph = FALSE, ncp = K)
 ```
 
-```{r}
+```{r pca atipicos}
 # Gráfico T2 Hotelling
 misScores = res.pca$ind$coord[,1:K]
 miT2 = colSums(t(misScores**2)/eig.val[1:K,1])
@@ -390,12 +395,9 @@ abline(h = F95, col = "orange", lty = 2, lwd = 2)
 abline(h = F99, col = "red3", lty = 2, lwd = 2)
 anomalas = which(miT2 > F95)
 anomalas
+```
 
-# Score plots
-library(grid)
-library(gridExtra)
-
-
+```{r individuos}
 p1 = fviz_pca_ind(res.pca, axes = c(1,2), geom = c("point"),
                   habillage = factor(miT2 > F95)) +
   tune::coord_obs_pred()
@@ -408,103 +410,133 @@ p2 = fviz_pca_ind(res.pca, axes = c(1,3), geom = c("point"),
 grid.arrange(p1,p2, nrow = 1)
 ```
 
-```{r}
+
+```{r variables}
 fviz_pca_var(res.pca, axes = c(1,2), repel = TRUE, col.var = "contrib",
              gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"))
-fviz_pca_var(res.pca, axes = c(3,4), repel = TRUE, col.var = "contrib",
+fviz_pca_var(res.pca, axes = c(1,3), repel = TRUE, col.var = "contrib",
              gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"))
 ```
 
-```{r}
+```{r contribucion pca1}
 fviz_contrib(res.pca, choice = "var", axes = 1)
 ```
 
 
-
-
 # PLS
 
-```{r}
-library(pls)
+```{r pls}
+
 X <- barrios_scaled %>%
   select(-precio)  # remove the target from predictors
 
 y <- barrios_scaled$precio
 
 pls_model <- plsr(y ~ ., data = X, scale = FALSE, validation = "CV")
+summary(pls_model)
 ```
 
-```{r}
+```{r validacion}
 validationplot(pls_model, val.type = "MSEP")
 ```
 
-```{r}
-predictions <- predict(pls_model, ncomp = 3) 
-summary(pls_model)
-plot(RMSEP(pls_model))
-```
 
-```{r}
+```{r pls loadings}
 loadings <- pls_model$loading.weights[, 1:3]  # weights for first 3 components
 print(loadings)
 ```
 
-```{r}
-library(plsVarSel)
-
-VIP <- function(pls_model) {
-  # Get components and original data
-  T <- pls_model$scores
-  P <- pls_model$loadings
+```{r vip componente 1}
+VIP_single_component <- function(pls_model, component_number) {
   W <- pls_model$loading.weights
-  Y <- pls_model$Yloadings
-  ncomp <- pls_model$ncomp
+  Yload <- pls_model$Yloadings
+  SS <- drop(Yload^2)[component_number]   # sum of squares for selected component
+  Wnorm2 <- sum(W[, component_number]^2)
   
-  # Calculate VIP scores
-  SS <- drop(Y^2)  # sum of squares for each component
-  Wnorm2 <- apply(W^2, 2, sum)
-  SSW <- sweep(W^2, 2, SS / Wnorm2, "*")
-  VIP <- sqrt(ncol(W) * rowSums(SSW) / sum(SS))
-  names(VIP) <- rownames(W)
-  return(VIP)
+  vip_scores <- sqrt(ncol(W) * (W[, component_number]^2 * (SS / Wnorm2)) / SS)
+  names(vip_scores) <- rownames(W)
+  return(vip_scores)
 }
 
-vip_scores <- VIP(pls_model)
-sort(vip_scores, decreasing = TRUE)
+vip_comp1 <- VIP_single_component(pls_model, 1)
+sort(vip_comp1, decreasing = TRUE)
 ```
 
-```{r}
+```{r vip componente 2}
+vip_comp2 <- VIP_single_component(pls_model, 2)
+sort(vip_comp2, decreasing = TRUE)
+```
+
+```{r vip componente 3}
+vip_comp3 <- VIP_single_component(pls_model, 3)
+sort(vip_comp3, decreasing = TRUE)
+```
+
+```{r ordenar vip}
 vip_df <- data.frame(
-  variable = names(vip_scores),
-  VIP = vip_scores
+  #variable = names(vip1),
+  comp1 = vip_comp1,
+  comp2 = vip_comp2,
+  comp3 = vip_comp3
 )
-
-ggplot(vip_df, aes(x = reorder(variable, VIP), y = VIP)) +
-  geom_col(fill = "steelblue") +
-  coord_flip() +
-  geom_hline(yintercept = 1, linetype = "dashed", color = "red") +
-  labs(
-    title = "Variable Importance (VIP) for Predicting Precio",
-    x = "Predictor Variable",
-    y = "VIP Score"
-  ) +
-  theme_minimal()
+vip_df
+vip_df %>%
+  filter(comp1 > 1 | comp2 > 1 | comp3 > 1) %>%
+  arrange(desc(comp1 + comp2 + comp3))
 ```
 
 
-
-
-
-
-
-
-
-
-
-
+Quedamos las variables:
 
 
 
 ## Agrupaciones de barrios (clusterización)
+
+```{r}
+# Nombres de las columnas que quieres escalar
+col <- setdiff(names(barrios_info), c("distrito","barrio"))
+
+# Escalas esas columnas y las reemplazas en el dataframe original
+barrios_info[col]<- scale(barrios_info[col])
+barrios_info
+```
+
+
+
+```{r clusters}
+pisos_completo <- merge(
+  pisos,
+  barrios_info,
+  by.x = c("neighbourhood_cleansed", "neighbourhood_group_cleansed"),
+  by.y = c("barrio", "distrito"),
+  all.x = TRUE
+)
+
+pisos_completo = subset(pisos_completo, select=-c(X, id,name,description, neighborhood_overview, host_id,instant_bookable, license, number_of_reviews, number_of_reviews_ltm, first_review, last_review, review_scores_rating,review_scores_accuracy,review_scores_cleanliness,review_scores_checkin,review_scores_communication,review_scores_location,review_scores_value, availability_365, maximum_nights, minimum_nights, amenities, latitude, longitude, host_identity_verified, host_has_profile_pic, host_verifications, host_total_listings_count, host_listings_count, host_is_superhost, host_acceptance_rate, host_response_rate, host_response_time, host_about, host_location, host_since, host_name, amenities,reviews_per_month,num_amenities,distancia_P_Ayuntamiento, distancia_Estacion,precio,dollarPrice,price, codbarrio, coddistrito))
+```
+
+
+```{r}
+midist <- get_dist(pisos_completo, stand = FALSE, method = "euclidean")
+fviz_dist(midist, show_labels = TRUE, lab_size = 0.3,
+          gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+```
+
+
+```{r warning=FALSE}
+p1 = fviz_nbclust(x = pisos_completo, FUNcluster = hcut, method = "silhouette", 
+                  hc_method = "ward.D2", k.max = 10, verbose = FALSE, 
+                  hc_metric = "euclidean") + labs(title = "Num. optimo clusters")
+p2 = fviz_nbclust(x = pisos_completo, FUNcluster = hcut, method = "wss", 
+                  hc_method = "ward.D2", k.max = 10, verbose = FALSE, 
+                  hc_metric = "euclidean") + labs(title = "Num. optimo clusters")
+grid.arrange(p1, p2, nrow = 1)
+```
+
+```{r}
+clust1 <- hclust(midist, method="ward.D2")
+grupos1 <- cutree(clust1, k=5)
+table(grupos1)
+```
 
 
