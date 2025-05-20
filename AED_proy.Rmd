@@ -259,26 +259,34 @@ list_limpiado_pisos2 <- list_limpiado_pisos2 %>%
   filter(host_listings_count <= 800)
 ```
 
+
+```{r anomalas}
+anomalas = which(miT2 > F95)
+anomalas
+list_limpiado_pisos_sin_anom <- list_limpiado_pisos2[-anomalas, ]
+```
 Se ha decidido eliminar los apartamentos con un mínimo nº de noches demasiado alto, se ha fijado en 30 días (aproximadamente un mes)
 
 ```{r minimum_nights}
-table (list_limpiado_pisos2$minimum_nights[list_limpiado_pisos2$minimum_nights>30])
+table (list_limpiado_pisos_sin_anom$minimum_nights[list_limpiado_pisos_sin_anom$minimum_nights>30])
 library(dplyr)
-list_limpiado_pisos2 <- list_limpiado_pisos2 %>%
+list_limpiado_pisos_sin_anom <- list_limpiado_pisos_sin_anom %>%
   filter(minimum_nights <= 30)
 ```
 
+
 ```{r unir}
 library(dplyr)
-colnames(list_limpiado_pisos2)[colnames(list_limpiado_pisos2) == "id"] <- "listing_id"
-head(list_limpiado_pisos2, 3)
-unido = merge(list_limpiado_pisos2, val_rev, by = "listing_id", all.x = TRUE)
+colnames(list_limpiado_pisos_sin_anom)[colnames(list_limpiado_pisos_sin_anom) == "id"] <- "listing_id"
+head(list_limpiado_pisos_sin_anom, 3)
+unido = merge(list_limpiado_pisos_sin_anom, val_rev, by = "listing_id", all.x = TRUE)
 head(unido, 3)
 ```
 
 
 ```{r csv}
-write.csv(unido, "valencia_unido.csv")
+write.csv(list_limpiado_pisos_sin_anom, "listings_valenciaAAA.csv")
+write.csv(unido, "valencia_unidoAAA.csv")
 ```
 ```
 

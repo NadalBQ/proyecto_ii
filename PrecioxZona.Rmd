@@ -17,6 +17,16 @@ Para realizar el estudio de precio de alquiler de airbnb por barrios se necesita
 
 ```{r datos}
 pisos = read.csv2("listings_valencia.csv", sep = ',')
+# Convertimos a numéricas las variables que se cargan como texto
+pisos$bathrooms <- round(as.numeric(as.factor(pisos$bathrooms)))
+pisos$review_scores_rating <- as.numeric(as.factor(pisos$review_scores_rating))
+pisos$review_scores_accuracy <- as.numeric(as.factor(pisos$review_scores_accuracy))
+pisos$review_scores_cleanliness <- as.numeric(as.factor(pisos$review_scores_cleanliness))
+pisos$review_scores_checkin <- as.numeric(as.factor(pisos$review_scores_checkin))
+pisos$review_scores_communication <- as.numeric(as.factor(pisos$review_scores_communication))
+pisos$review_scores_location <- as.numeric(as.factor(pisos$review_scores_location))
+pisos$review_scores_value <- as.numeric(as.factor(pisos$review_scores_value))
+pisos$reviews_per_month <- as.numeric(as.factor(pisos$reviews_per_month))
 head(pisos)
 ```
 
@@ -36,15 +46,15 @@ library(leaflet)
 
 # ANÁLISIS DE BARRIOS
 
-Una vez se ha leído el fichero correctamente, ser observan algunos parámetros estadísticos que pueden ser útiles para este análisis, como es el caso de la media, la mediana o la desviación típica del la variable dollarPrice(precio del alquiler).
+Una vez se ha leído el fichero correctamente, ser observan algunos parámetros estadísticos que pueden ser útiles para este análisis, como es el caso de la media, la mediana o la desviación típica del la variable price(precio del alquiler).
 
 ```{r barrio summary}
 pisos %>%
   group_by(pisos$neighbourhood_cleansed) %>%
   summarise(
-    media = mean(dollarPrice, na.rm = TRUE),
-    mediana = median(dollarPrice, na.rm = TRUE),
-    sd = sd(dollarPrice, na.rm = TRUE),
+    media = mean(price, na.rm = TRUE),
+    mediana = median(price, na.rm = TRUE),
+    sd = sd(price, na.rm = TRUE),
     n = n()
   ) %>%
   arrange(desc(media))
@@ -59,7 +69,7 @@ barrios <- st_read("valencia.geojson")  # Asegúrate de que el archivo esté en 
 precios_zona <- pisos %>%
   group_by(neighbourhood_cleansed) %>%
   summarise(
-    media_precio = mean(dollarPrice, na.rm = TRUE)
+    media_precio = mean(price, na.rm = TRUE)
   )
 
 # Unir los datos espaciales con los precios
@@ -106,7 +116,7 @@ Se observa que el mapa sale distorsionado y no se puede comprobar bien la inform
 # Calcular la media de los precios por barrio
 precios_por_barrio <- pisos %>%
   group_by(neighbourhood_cleansed) %>%
-  summarise(media_precio = mean(dollarPrice, na.rm = TRUE))
+  summarise(media_precio = mean(price, na.rm = TRUE))
 
 # Ordenar los barrios por la media de los precios
 precios_por_barrio <- precios_por_barrio %>%
@@ -121,13 +131,13 @@ pisos_mitad_inferior <- pisos %>% filter(neighbourhood_cleansed %in% mitad_infer
 pisos_mitad_superior <- pisos %>% filter(neighbourhood_cleansed %in% mitad_superior$neighbourhood_cleansed)
 
 # Boxplot para la mitad inferior de barrios
-ggplot(pisos_mitad_inferior, aes(x = neighbourhood_cleansed, y = dollarPrice)) +
+ggplot(pisos_mitad_inferior, aes(x = neighbourhood_cleansed, y = price)) +
   geom_boxplot() +
   labs(title = "Distribución de Precios por Barrio (Mitad Inferior)", x = "Barrio", y = "Precio ($)") +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
 # Boxplot para la mitad superior de barrios
-ggplot(pisos_mitad_superior, aes(x = neighbourhood_cleansed, y = dollarPrice)) +
+ggplot(pisos_mitad_superior, aes(x = neighbourhood_cleansed, y = price)) +
   geom_boxplot() +
   labs(title = "Distribución de Precios por Barrio (Mitad Superior)", x = "Barrio", y = "Precio ($)") +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
@@ -139,12 +149,12 @@ En este gráfico no se puede comprobar mucho debido a la cantidad de atípicos q
 ```{r boxplot precio filtrado}
 # Filtrar los datos para incluir solo los precios menores o iguales a 400
 pisos_filtrados <- pisos %>%
-  filter(dollarPrice <= 400)
+  filter(price <= 400)
 
 # Calcular la media de los precios por barrio para los datos filtrados
 precios_por_barrio_filtrados <- pisos_filtrados %>%
   group_by(neighbourhood_cleansed) %>%
-  summarise(media_precio = mean(dollarPrice, na.rm = TRUE))
+  summarise(media_precio = mean(price, na.rm = TRUE))
 
 # Ordenar los barrios por la media de los precios filtrados
 precios_por_barrio_filtrados <- precios_por_barrio_filtrados %>%
@@ -162,13 +172,13 @@ pisos_mitad_superior_filtrada <- pisos_filtrados %>%
   filter(neighbourhood_cleansed %in% mitad_superior_filtrada$neighbourhood_cleansed)
 
 # Boxplot para la mitad inferior de barrios filtrados
-ggplot(pisos_mitad_inferior_filtrada, aes(x = neighbourhood_cleansed, y = dollarPrice)) +
+ggplot(pisos_mitad_inferior_filtrada, aes(x = neighbourhood_cleansed, y = price)) +
   geom_boxplot() +
   labs(title = "Distribución de Precios por Barrio (Mitad Inferior, Precio <= 400)", x = "Barrio", y = "Precio ($)") +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
 # Boxplot para la mitad superior de barrios filtrados
-ggplot(pisos_mitad_superior_filtrada, aes(x = neighbourhood_cleansed, y = dollarPrice)) +
+ggplot(pisos_mitad_superior_filtrada, aes(x = neighbourhood_cleansed, y = price)) +
   geom_boxplot() +
   labs(title = "Distribución de Precios por Barrio (Mitad Superior, Precio <= 400)", x = "Barrio", y = "Precio ($)") +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
@@ -204,7 +214,7 @@ Para comprobar que no se detecta ninguna anomalía más se vuelve a mostrar el m
 precios_zona <- pisos_filtrados %>%
   group_by(neighbourhood_cleansed) %>%
   summarise(
-    media_precio = mean(dollarPrice, na.rm = TRUE)
+    media_precio = mean(price, na.rm = TRUE)
   )
 
 # Unir los datos espaciales con los precios
@@ -253,9 +263,9 @@ Ahora se observa que los precios más altos se muestran en el centro, así que s
 pisos_filtrados %>%
   group_by(pisos_filtrados$neighbourhood_cleansed) %>%
   summarise(
-    media = mean(dollarPrice, na.rm = TRUE),
-    mediana = median(dollarPrice, na.rm = TRUE),
-    sd = sd(dollarPrice, na.rm = TRUE),
+    media = mean(price, na.rm = TRUE),
+    mediana = median(price, na.rm = TRUE),
+    sd = sd(price, na.rm = TRUE),
     n = n()
   ) %>%
   arrange(desc(media))
@@ -267,7 +277,7 @@ Ahora los barrios con alquileres más caros son bastante representativos así qu
 
 Pero antes de realizar ningún estudio hay que tener en cuenta que la variable precio por si sola realmente no explica correctamente las diferencias de precios entre barrios, habría que crear una nueva variable ponderada por otras variables que también afecten al precio.
 
-En el dataset de listings solo se tienen las siguientes variables descriptivas de la vivienda: nº de habitaciones, nº de baños, nº deacommodates y una lista de servicios, por lo que se va a realizar una regresión lineal para comprobar cuanto afecta cada variable respectivamente al precio (dollarPrice).
+En el dataset de listings solo se tienen las siguientes variables descriptivas de la vivienda: nº de habitaciones, nº de baños, nº deacommodates y una lista de servicios, por lo que se va a realizar una regresión lineal para comprobar cuanto afecta cada variable respectivamente al precio (price).
 
 ```{r servicios piso}
 # Convertir la lista de servicios en numerico contando cuanto hay 
@@ -275,7 +285,7 @@ pisos_filtrados$num_amenities <- sapply(pisos_filtrados$amenities, function(x) l
 ```
 
 ```{r summary modelo}
-summary(lm(dollarPrice ~ bedrooms + bathrooms + accommodates + num_amenities, data = pisos_filtrados))
+summary(lm(price ~ bedrooms + bathrooms + accommodates + num_amenities, data = pisos_filtrados))
 ```
 A partir de este modelo se observa que todas las variables son significativas (p-valor< 0.001) menos la variable de los servicios, por lo que influyen en el precio. La variable bedrooms toma un valor de 9.79, es decir cada dormitorio extra aumenta el precio en promedio 9.79 dólares, manteniendo lo demás constante. La variable bathrooms toma un valor de	28.53	por lo que cada baño extra aumenta el precio en promedio 28.53 dólares, todo lo demás constante. Por último, la varible accommodates toma un valor de 13.66, cada persona adicional que puede alojarse aumenta el precio en promedio 13.66 dólares, todo lo demás igual. Como la variable ammenities no influye, no vamos a incluirla en el modelo.
 
@@ -294,7 +304,7 @@ pisos_filtrados$precio_ponderado <- 9.7842 * pisos_filtrados$bedrooms + 28.4985 
 Una vez creada la variable precio_ponderado, se calcula una relación media para comprobar si el piso es más caro de lo que debería (>1), está en buen precio(=1) o está más barato(<1):
 
 ```{r precio ponderado peso}
-pisos_filtrados$peso <- pisos_filtrados$dollarPrice / pisos_filtrados$precio_ponderado
+pisos_filtrados$peso <- pisos_filtrados$price / pisos_filtrados$precio_ponderado
 ```
 
 Ahora vamos a ver si hay atípicos del precio ponderado de cada barrio.
@@ -363,7 +373,7 @@ Para comprobar que se ha realizado una buena limpieza de atípicos y un buen cá
 zonas <- pisos_limpios %>%
   group_by(neighbourhood_cleansed) %>%
   summarise(
-    precio_medio = mean(dollarPrice, na.rm = TRUE),
+    precio_medio = mean(price, na.rm = TRUE),
     ponderado_medio = mean(precio_ponderado, na.rm = TRUE),
     relacion_precio_media = mean(peso, na.rm = TRUE),
     n = n()
@@ -398,7 +408,7 @@ data_clean$cluster <- kmeans_result$cluster
 
 # Crear el gráfico de dispersión
 
-ggplot(data_clean, aes(x = dollarPrice, y = precio_ponderado, color = as.factor(cluster))) +
+ggplot(data_clean, aes(x = price, y = precio_ponderado, color = as.factor(cluster))) +
 geom_point(size = 3) +
 labs(title = "Comparación entre Precio y Precio Ponderado", x = "Precio", y = "Precio Ponderado") +
 theme_minimal()
