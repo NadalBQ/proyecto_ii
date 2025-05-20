@@ -421,7 +421,7 @@ fviz_pca_var(res.pca, axes = c(1,3), repel = TRUE, col.var = "contrib",
 ```{r contribucion pca1}
 fviz_contrib(res.pca, choice = "var", axes = 1)
 ```
-
+Queremos predecir el valor de una var a partir de otras y hay multicolinealidad es mejor usar el pls. 
 
 # PLS
 
@@ -504,7 +504,7 @@ barrios_info
 
 
 ```{r clusters}
-pisos_completo <- merge(
+pisos_completo_precio <- merge(
   pisos,
   barrios_info,
   by.x = c("neighbourhood_cleansed", "neighbourhood_group_cleansed"),
@@ -512,7 +512,7 @@ pisos_completo <- merge(
   all.x = TRUE
 )
 
-pisos_completo = subset(pisos_completo, select=-c(X, id,name,description, neighborhood_overview, host_id,instant_bookable, license, number_of_reviews, number_of_reviews_ltm, first_review, last_review, review_scores_rating,review_scores_accuracy,review_scores_cleanliness,review_scores_checkin,review_scores_communication,review_scores_location,review_scores_value, availability_365, maximum_nights, minimum_nights, amenities, latitude, longitude, host_identity_verified, host_has_profile_pic, host_verifications, host_total_listings_count, host_listings_count, host_is_superhost, host_acceptance_rate, host_response_rate, host_response_time, host_about, host_location, host_since, host_name, amenities,reviews_per_month,num_amenities,distancia_P_Ayuntamiento, distancia_Estacion,precio,dollarPrice,price, codbarrio, coddistrito))
+pisos_completo = subset(pisos_completo_precio, select=-c(X, X.1,listing_id,name,description, neighborhood_overview, host_id,instant_bookable, license, number_of_reviews, number_of_reviews_ltm, first_review, last_review, review_scores_rating,review_scores_accuracy,review_scores_cleanliness,review_scores_checkin,review_scores_communication,review_scores_location,review_scores_value, availability_365, maximum_nights, minimum_nights, amenities, latitude, longitude, host_identity_verified, host_has_profile_pic, host_verifications, host_total_listings_count, host_listings_count, host_is_superhost, host_acceptance_rate, host_response_rate, host_response_time, host_about, host_location, host_since, host_name, amenities,reviews_per_month,num_amenities,distancia_Bioparc,distancia_Estacion,distancia_CAC,distancia_Puerto,precio,price, codbarrio, coddistrito,neighbourhood_cleansed,neighbourhood_group_cleansed,precio_ponderado))
 ```
 
 
@@ -522,7 +522,7 @@ fviz_dist(midist, show_labels = TRUE, lab_size = 0.3,
           gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
 ```
 
-
+## Método de Ward
 ```{r warning=FALSE}
 p1 = fviz_nbclust(x = pisos_completo, FUNcluster = hcut, method = "silhouette", 
                   hc_method = "ward.D2", k.max = 10, verbose = FALSE, 
@@ -535,8 +535,124 @@ grid.arrange(p1, p2, nrow = 1)
 
 ```{r}
 clust1 <- hclust(midist, method="ward.D2")
-grupos1 <- cutree(clust1, k=5)
+grupos1 <- cutree(clust1, k=4)
 table(grupos1)
 ```
 
+## Método de la media
+```{r warning=FALSE}
+p1 = fviz_nbclust(x = pisos_completo, FUNcluster = hcut, method = "silhouette", 
+                  hc_method = "average", k.max = 10, verbose = FALSE, 
+                  hc_metric = "euclidean") + labs(title = "Num. optimo clusters")
+p2 = fviz_nbclust(x = pisos_completo, FUNcluster = hcut, method = "wss", 
+                  hc_method = "average", k.max = 10, verbose = FALSE, 
+                  hc_metric = "euclidean") + labs(title = "Num. optimo clusters")
+grid.arrange(p1, p2, nrow = 1)
+```
+```{r}
+clust2 <- hclust(midist, method="average")
+grupos2 = cutree(clust2, k = 3)
+table(grupos2)
+```
 
+## K-medias
+```{r}
+p1 = fviz_nbclust(x = pisos_completo, FUNcluster = kmeans, method = "silhouette", 
+             k.max = 10, verbose = FALSE) +
+  labs(title = "K-means")
+p2 = fviz_nbclust(x = pisos_completo, FUNcluster = kmeans, method = "wss", 
+             k.max = 10, verbose = FALSE) +
+  labs(title = "K-means")
+grid.arrange(p1, p2, nrow = 1)
+```
+
+```{r}
+set.seed(100)
+clust3 <- kmeans(pisos_completo, centers = 4, nstart = 20)
+table(clust3$cluster)
+```
+## K-medoides
+```{r}
+p1 = fviz_nbclust(x = pisos_completo, FUNcluster = pam, method = "silhouette", 
+             k.max = 10, verbose = FALSE) +
+  labs(title = "Numero optimo de clusters")
+p2 = fviz_nbclust(x = pisos_completo, FUNcluster = pam, method = "wss", 
+             k.max = 10, verbose = FALSE) +
+  labs(title = "Numero optimo de clusters")
+grid.arrange(p1, p2, nrow = 1)
+```
+
+```{r}
+clust4 <- pam(pisos_completo, k = 5)
+table(clust4$clustering)
+```
+## Validación
+
+```{r}
+library(ggsci)
+colores = pal_npg("nrc")(6)
+colores2 = pal_npg("nrc")(7)
+par(mfrow = c(1,3))
+plot(silhouette(grupos1, midist), col=colores, border=NA, main = "WARD")
+plot(silhouette(clust3$cluster, midist), col=colores, border=NA, main = "K-MEDIAS")
+plot(silhouette(clust4$clustering, midist), col=colores2, border=NA, main = "K-MEDOIDES")
+```
+
+
+```{r}
+metodos = c("kmeans","pam")
+validacion = suppressMessages(clValid(pisos_completo, nClust = 4:5, metric = "euclidean", 
+                      clMethods = metodos, 
+                      validation = c("internal"),
+                      method = "ward"))
+summary(validacion)
+```
+
+```{r}
+set.seed(100)
+clustprueba <- kmeans(pisos_completo, centers = 4, nstart = 20)
+table(clustprueba$cluster)
+```
+
+## Interpretación
+
+```{r}
+misclust = factor(clustprueba$cluster)
+miPCA = PCA(pisos_completo, scale.unit = FALSE, graph = FALSE)
+eig.val = get_eigenvalue(miPCA)
+Vmedia = 100 * (1/nrow(eig.val))
+fviz_eig(miPCA, addlabels = TRUE) +
+  geom_hline(yintercept=Vmedia, linetype=2, color="red")
+```
+```{r}
+p1 = fviz_pca_ind(miPCA, geom = "point", habillage = misclust, 
+                  addEllipses = TRUE, palette = colores)
+p2 = fviz_pca_var(miPCA)
+grid.arrange(p1, p2, nrow = 1)
+
+p1 = fviz_pca_ind(miPCA, geom = "point", habillage = misclust, 
+                  addEllipses = TRUE, axes = c(1,3), palette = colores)
+p2 = fviz_pca_var(miPCA, axes = c(1,3))
+grid.arrange(p1, p2, nrow = 1)
+p2
+```
+1 componente: transportre
+2: distancias
+3: vivienda (baños, accomodates, bedrooms)
+
+```{r}
+mediasCluster = aggregate(pisos_completo, by = list("cluster" = misclust), mean)[,-1]
+rownames(mediasCluster) = paste0("c",1:4)
+kable(t(round(mediasCluster,2)))
+```
+
+```{r}
+matplot(t(mediasCluster), type = "l", col = colores, ylab = "", xlab = "", lwd = 2,
+        lty = 1, main = "Perfil medio de los clusters", xaxt = "n")
+axis(side = 1, at = 1:ncol(pisos_completo), labels = colnames(pisos_completo), las = 2)
+legend("topleft", as.character(1:4), col = colores, lwd = 2, ncol = 3, bty = "n")
+```
+```{r}
+boxplot(pisos_completo_precio$precio_ponderado ~ misclust, col = colores)
+```
+Los clusters del tercero tienen menor precio ponderado
