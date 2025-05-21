@@ -1,0 +1,248 @@
+---
+title: "Objetivo"
+author: "Maria"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Se importan las librerias a utilizar 
+
+```{r librerías}
+library(dplyr)
+library(lubridate)
+library(tidyr)
+library(cluster)
+library(factoextra)
+```
+
+
+## Evaluación de la fiabilidad del propietario 
+Análisis por cluster de desviación del precio ponderado de la vivienda con el precio ponderado del barrio y la influencia de la fiabilidad del propietario
+
+```{r variables útiles}
+pisos = read.csv("pisos_limpios.csv", sep=',')
+head(pisos)
+
+# FIAILIDAD HOST: host_since, host_location, host_about, host_response_time, host_response_rate, host_acceptance_rate, host_is_superhost, host_listings_count, host_total_listings_count, host_verifications, host_has_profile_pic, host_identity_verified, license
+
+# DISPONIBILIDAD VIVIENDA: maximum_nights, minimum_nights, availability_365
+```
+
+```{r arreglo de decimales}
+pisos$precio_ponderado <- as.numeric(gsub(",", ".", pisos$precio_ponderado))
+```
+
+Se agrupan los datos según la columna neighbourhood_cleansed (que representa los barrios), y luego se calcula la media del precio_ponderado para cada barrio.
+
+```{r}
+# Calcular media del precio ponderado por barrio
+precio_barrio <- pisos %>%
+  group_by(neighbourhood_cleansed) %>%
+  summarise(precio_ponderado_barrio = mean(precio_ponderado, na.rm = TRUE))
+
+precio_barrio
+```
+
+```{r}
+pisos <- left_join(pisos, precio_barrio, by = "neighbourhood_cleansed")
+```
+
+
+## Transformación/ Adición de variables
+
+Creamos una variable para la desviación relativa entre el precio de la vivienda y el precio medio del barrio.Esta variable indica cuánto se desvía el precio del alojamiento respecto al barrio.
+
+```{r}
+pisos$desviacion_precio <- (pisos$precio_ponderado - pisos$precio_ponderado_barrio) / pisos$precio_ponderado_barrio
+```
+
+```{r booleanos transformados a binarios}
+pisos$host_is_superhost <- as.numeric(pisos$host_is_superhost == "t")
+pisos$host_identity_verified <- as.numeric(pisos$host_identity_verified == "t")
+pisos$host_has_profile_pic <- as.numeric(pisos$host_has_profile_pic == "t")
+
+```
+
+
+```{r análisis de fiabilidad general}
+
+analisis_fiabilidad_general <- function(pisos) {
+  library(dplyr)
+  library(lubridate)
+  
+  df <- pisos
+  
+  ## Transformaciones a variables numéricas
+  
+  # Convertir fecha de host al nº de días que lleva siendo host
+  df$host_since <- ymd(df$host_since)
+  df$antiguedad_host <- as.numeric(difftime(Sys.Date(), df$host_since, units = "days"))
+  
+  # De booleanas a binarias
+  df$host_is_superhost <- as.numeric(df$host_is_superhost == "t")
+  df$host_identity_verified <- as.numeric(df$host_identity_verified == "t")
+  df$host_has_profile_pic <- as.numeric(df$host_has_profile_pic == "t")
+  df$instant_bookable <- as.numeric(df$instant_bookable == "t")
+  
+  # Transformación de categórica ordinal a numérica
+  df$host_response_time <- gsub("a few days or more", "4", df$host_response_time)
+  df$host_response_time <- gsub("within a day", "3", df$host_response_time)
+  df$host_response_time <- gsub("within a few hours", "2", df$host_response_time)
+  df$host_response_time <- gsub("within an hour", "1", df$host_response_time)
+  df$host_response_time <- as.numeric(df$host_response_time)
+  
+  # Arreglo de la variable price
+  df$host_response_rate <- as.numeric(gsub("%", "", df$host_response_rate)) / 100
+  df$host_acceptance_rate <- as.numeric(gsub("%", "", df$host_acceptance_rate)) / 100
+  
+  # Crear una nueva variable que cuente cuántos métodos de verificación tiene cada anfitrión, usando la variable host_verifications.
+  df$num_verificaciones <- sapply(df$host_verifications, function(x) length(unlist(strsplit(as.character(x), ",\\s*"))))
+  
+  # Escalar y calcular score
+  variables_fiabilidad <- df %>% 
+    select(antiguedad_host, host_is_superhost, host_identity_verified,
+           host_has_profile_pic, instant_bookable, host_response_time,
+           host_response_rate, host_acceptance_rate, num_verificaciones)
+  
+  variables_fiabilidad <- scale(variables_fiabilidad)
+  
+  df$score_fiabilidad <- rowSums(variables_fiabilidad, na.rm = TRUE)
+  
+    # Normalización
+  df$fiabilidad_normalizada <- ((df$score_fiabilidad - mean(df$score_fiabilidad))/sd(df$score_fiabilidad, na.rm = TRUE))
+  
+  # Reescalar a rango 0-5
+  score_min <- min(df$fiabilidad_normalizada, na.rm = TRUE)
+  score_max <- max(df$fiabilidad_normalizada, na.rm = TRUE)
+  
+  df$score_fiabilidad_0a5 <- (df$fiabilidad_normalizada - score_min) / (score_max - score_min) * 5
+  df$score_fiabilidad_0a5 <- round(df$score_fiabilidad_0a5, 2)
+  
+  # Mostrar resumen
+  cat("===== Análisis General de Fiabilidad del Anfitrión =====\n\n")
+  cat("Número de observaciones:", nrow(df), "\n")
+  cat("Número de barrios únicos:", length(unique(df$neighbourhood_cleansed)), "\n")
+  
+  cat("\nEstadísticas descriptivas del score de fiabilidad:\n")
+  print(summary(df$score_fiabilidad))
+  
+  cat("\nFiabilidad media global:\n")
+  cat(round(mean(df$score_fiabilidad, na.rm = TRUE), 2), "\n")
+  
+  return(df)
+}
+
+
+```
+
+```{r Análisis de fiabilidad total}
+pisos_analizados <- analisis_fiabilidad_general(pisos)
+```
+
+
+# Clustering por barrios
+
+
+```{r función de análisis por cluster}
+analisis_fiabilidad_por_barrios <- function(pisos, barrios_path, n_cluster) {
+  library(dplyr)
+  library(lubridate)
+  
+  # Leer datos
+  df <- pisos
+  barrios_cluster <- read.csv(barrios_path, sep = ",")
+  
+  # Estándar: nombre de columna para filtrar barrios
+  nombres_col <- names(barrios_cluster)
+  if ("barrio" %in% nombres_col) {
+    barrios <- barrios_cluster$barrio
+  } else if ("neighbourhood_cleansed" %in% nombres_col) {
+    barrios <- barrios_cluster$neighbourhood_cleansed
+  } else {
+    stop("El archivo de barrios debe tener una columna llamada 'barrio' o 'neighbourhood_cleansed'.")
+  }
+
+  # Filtrar los barrios seleccionados
+  df <- df %>% filter(neighbourhood_cleansed %in% barrios)
+  
+  # Transformaciones a numérico
+  
+  # Convertir fecha de host al nº de días que lleva siendo host
+  df$host_since <- ymd(df$host_since)
+  df$antiguedad_host <- as.numeric(difftime(Sys.Date(), df$host_since, units = "days"))
+  
+  # De booleanas a binarias
+  df$host_is_superhost <- as.numeric(df$host_is_superhost == "t")
+  df$host_identity_verified <- as.numeric(df$host_identity_verified == "t")
+  df$host_has_profile_pic <- as.numeric(df$host_has_profile_pic == "t")
+  df$instant_bookable <- as.numeric(df$instant_bookable == "t")
+  
+  # Transformación de categórica ordinal a numérica
+  df$host_response_time <- gsub("a few days or more", "4", df$host_response_time)
+  df$host_response_time <- gsub("within a day", "3", df$host_response_time)
+  df$host_response_time <- gsub("within a few hours", "2", df$host_response_time)
+  df$host_response_time <- gsub("within an hour", "1", df$host_response_time)
+  df$host_response_time <- as.numeric(df$host_response_time)
+  
+  # Arreglo de la variable price
+  df$host_response_rate <- as.numeric(gsub("%", "", df$host_response_rate)) / 100
+  df$host_acceptance_rate <- as.numeric(gsub("%", "", df$host_acceptance_rate)) / 100
+  
+  # Crear una nueva variable que cuente cuántos métodos de verificación tiene cada anfitrión, usando la variable host_verifications.
+  df$num_verificaciones <- sapply(df$host_verifications, function(x) length(unlist(strsplit(as.character(x), ",\\s*"))))
+  
+  # Escalar y calcular score de fiabilidad
+  variables_fiabilidad <- df %>% 
+    select(antiguedad_host, host_is_superhost, host_identity_verified,
+           host_has_profile_pic, instant_bookable, host_response_time,
+           host_response_rate, host_acceptance_rate, num_verificaciones)
+  
+  variables_fiabilidad <- scale(variables_fiabilidad)
+  
+  df$score_fiabilidad <- rowSums(variables_fiabilidad, na.rm = TRUE)
+  
+  # Normalización
+  df$fiabilidad_normalizada <- ((df$score_fiabilidad - mean(df$score_fiabilidad))/sd(df$score_fiabilidad, na.rm = TRUE))
+  
+  # Reescalar a 0-5
+  score_min <- min(df$fiabilidad_normalizada, na.rm = TRUE)
+  score_max <- max(df$fiabilidad_normalizada, na.rm = TRUE)
+  
+  df$score_fiabilidad_0a5 <- (df$fiabilidad_normalizada - score_min) / (score_max - score_min) * 5
+
+  # Redondear a 2 decimales
+  df$score_fiabilidad_0a5 <- round(df$score_fiabilidad_0a5, 2)
+  
+  # Resumen
+  cat(sprintf("===== Análisis de Fiabilidad del Anfitrión (Filtrado por el cluster %s) =====\n\n", n_cluster))
+  cat("Barrios incluidos:\n")
+  print(unique(df$neighbourhood_cleansed))
+  
+  cat("\nEstadísticas descriptivas del score de fiabilidad:\n")
+  summary_variable <- summary(df$score_fiabilidad_0a5)
+  print(summary_variable)
+  
+  cat("\nFiabilidad media del cluster:\n")
+  print(summary_variable[4])
+  
+  return(df)
+}
+  
+```
+
+```{r análisis de cada cluster}
+cluster_1 <- analisis_fiabilidad_por_barrios(pisos, "cluster1.csv", 1)
+cluster_2 <- analisis_fiabilidad_por_barrios(pisos, "cluster2.csv", 2)
+cluster_3 <- analisis_fiabilidad_por_barrios(pisos, "cluster3.csv", 3)
+cluster_4 <- analisis_fiabilidad_por_barrios(pisos, "cluster4.csv", 4)
+```
+
+```{r Extracción de fichero con fiabilidad}
+write.csv(pisos_analizados, "pisos_con_analisis_fiabilidad.csv")
+```
+
+
