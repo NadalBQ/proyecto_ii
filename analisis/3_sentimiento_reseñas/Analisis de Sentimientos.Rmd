@@ -1,0 +1,1113 @@
+---
+title: "Análisis de Sentimientos"
+author: "Isabelle"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+En este objetivo se realiza un análisis de sentimientos de las reseñas traducidas de las viviendas, agrupadas por clusters formados anteriormente.
+
+El primer paso determina el sentido de la reseña, si es positiva, negativa, o neutral. Para eso usamos la librería SentimentAnalysis.
+
+Los dos siguientes pasos usa la librería TidyText del TidyVerse. El segundo paso coge el diccionario afinn y cuantifica las palabras dentro de la reseña y tiene un score global de cuánto contribuyen las palabras dentro de la reseña. El último paso usa el diccionario bing y se puede ver las palabras específicas de las reseñas y cuántro contribuyen al score de sentimiento.
+
+# Carga y preparación de datos
+
+```{r librerias, message=FALSE, warning=FALSE}
+library(knitr)
+library(dplyr)
+library(tidyverse)
+library(SentimentAnalysis)
+library(tidyverse)
+library(tidytext)
+library(scales)
+library(ggplot2)
+library(sentimentr)
+library(gridExtra)
+library(FactoMineR)
+library(factoextra)
+library(corrplot)
+```
+
+```{r load sentiments}
+#Como tarda mucho recorrer los clusters (son muchas filas), cargamos los sentimientos hecho anteriormente:
+#load("sentiments_clusters.RData")
+```
+
+```{r load data}
+load("clusterdata_12pm.RData")
+```
+
+Cargamos los datos que vamos a analizar. Eliminamos las columnas no relacionadas a los comentarios y la ubicación. Después, renombramos algunas columnas para tenerlas mas claras. Finalmente, limpiamos todas las reseñas, quitando las saltas de líneas y espacios en blanco al final, para mejorar la lectura de las reseñas. 
+
+```{r cargar datos}
+traducciones <- read.csv("valencia_traducido.csv", sep=',')
+pisos_limpios <- read.csv("pisos_limpios.csv")
+
+val_trad <- traducciones[traducciones$listing_id %in% pisos_limpios$listing_id, ]
+rm(traducciones, pisos_limpios)
+
+#Quedamos con las variables que nos interesan analizar
+val_trad <- subset(val_trad, select=c(listing_id, id,neighbourhood_cleansed, neighbourhood_group_cleansed, cld3, comments_translated, translated_comment))
+
+#Renombrar las columnas
+names(val_trad)[names(val_trad) == 'comments_translated'] = 'comment_english' 
+names(val_trad)[names(val_trad) == 'translated_comment'] = 'comment_translated'
+names(val_trad)[names(val_trad) == 'id'] = 'review_id'
+
+head(val_trad)
+```
+
+```{r limpiar reseñas}
+
+limpiar_resena <- function(resena) {
+  resena %>%
+    str_replace_all("<br\\s*/?>", " ") %>%  # Reemplazar lineas nuevas con espacio
+    str_squish()                         # Quitar espacios en blanco al final
+}
+
+val_trad <- val_trad %>%
+  mutate(
+    comments_all = coalesce(comment_english, comment_translated),
+    comments_all = if_else(is.na(comments_all), "", limpiar_resena(comments_all))
+  )
+
+val_trad <- subset(val_trad, select=-c(comment_translated, comment_english))
+val_trad
+```
+
+
+# Los barrios de Valencia
+
+Ahora vamos a analizar los distintos barrios de Valencia para ver si las variables de la ubicación y de la vivienda influyen en las reseñas. Como resultado del objetivo 2, hemos obtenido una agrupación de barrios de 4 clusters según estas variables significativas. Vamos a analizarlos por individuo.
+
+## Cluster 1
+
+```{r c1}
+
+c1 <- read.csv("cluster1.csv")
+
+#Cogemos las viviendas de los barrios del cluster 1 y agrupamos por barrio
+c1 <- val_trad[val_trad$neighbourhood_cleansed %in% c1$barrio, ]
+
+#Comprobamos que esta bien
+barrios_c1 <- unique(c1$neighbourhood_cleansed)
+barrios_c1
+```
+
+Este cluster tiene 4 barrios y son: El Perellonet, La Gran Via, Pinedo, y Beniferri. Son zonas fuera de la ciudad, menos La Gran Via. 
+
+```{r c1 afinn + sentiments, message=FALSE, warning=FALSE}
+#sentiments_c1 <- analyzeSentiment(c1$comments_all)
+labels_c1 <- convertToDirection(sentiments_c1$SentimentQDAP) 
+
+c1 <- c1 %>%
+  mutate(
+    sentiment = labels_c1
+  )
+
+rm(sentiments_c1, labels_c1)
+
+# Modificar el data para que sea compatible con tidy 
+tidy_reviews_c1 <- c1 %>%
+  select(review_id, comments_all) %>%
+  unnest_tokens(word, comments_all)
+
+# Filtrar stopwords y palabras con numeros de tokens
+tidy_reviews_c1 <- tidy_reviews_c1 %>% 
+                filter(!grepl('[0-9]',word)) %>%
+                anti_join(stop_words)
+
+# Carga el lexicon afinn
+afinn <- get_sentiments("afinn")
+
+# Unir el lexicon afinn con el data tidy
+sentiments_afinn_c1 <- tidy_reviews_c1 %>%
+  inner_join(afinn, by = "word")
+
+# Calcular el score para cada resena
+sentiments_afinn_c1 <- sentiments_afinn_c1 %>%
+  group_by(review_id) %>%
+  summarize(sentiment_score = sum(value))
+
+# Unir el sentimiento con el data
+c1 <- inner_join(c1, sentiments_afinn_c1, by = "review_id")
+rm(sentiments_afinn_c1)
+
+# Visualizar los scores
+afinn_c1 <- ggplot(c1, aes(x = sentiment_score)) +
+  geom_histogram(binwidth = 1, fill = "lightblue", color = "black") +
+  scale_x_continuous(breaks = seq(-20, 20, 5), limits = c(-20, 20)) +
+  scale_y_continuous(label = comma) +
+  labs(x = "Puntuación de la Reseña", y = "Contado", title = "Distribución de las Puntuaciones usando AFINN Lexicón en Cluster 1")
+afinn_c1
+```
+
+Las puntuaciones de las reseñas tienen una distribución positivamente sesgada. Las puntuaciones tienden a ser mayores, con pocas reseñas con una puntuación negativa. Puede indicar que los barrios y las viviendas del cluster no tienen problemas, pero veremos esto veando las palabras más contribuyentes a continuación. 
+
+```{r c1 bing, message=FALSE, warning=FALSE}
+bing_word_counts_c1 <- tidy_reviews_c1 %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+bing_c1 <- bing_word_counts_c1 %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribución al Sentimiento",
+       y = NULL,
+       title = "Cluster 1")
+rm(tidy_reviews_c1, bing_word_counts_c1)
+bing_c1
+```
+La palabra negativa que afecta la punctuación más es "*ruido*". Significa que el peor problema de este cluster sería que los barrios dentro del cluster son ruidosos. Habían algunos *problemas* con las viviendas dentro del cluster, pero no sabemos si son en el contexto de ser con el propietario, la vivienda, o el barrio. Interesantemente, también ha aparecido muchas veces la palabra "*fría*", que puede indicar que las viviendas dentro del cluster no tienen aislamiento térmico bueno.
+
+```{r c1 normalizar + dataframe}
+media_c1 <- mean(c1$sentiment_score) 
+c1$sentiment_score_normal <- (c1$sentiment_score - media_c1) / sd(c1$sentiment_score) 
+score_min <- min(c1$sentiment_score_normal, na.rm = TRUE)
+score_max <- max(c1$sentiment_score_normal, na.rm = TRUE)
+c1$sentiment_score_normal <- (c1$sentiment_score_normal - score_min) / (score_max - score_min) * 5
+rm(media_c1)
+
+resumen_c1 <- data.frame(
+  negative = sum(c1$sentiment == "negative"),
+  neutral = sum(c1$sentiment == "neutral"),
+  positive = sum(c1$sentiment == "positive"),
+  puntuacion_media = mean(c1$sentiment_score, na.rm = TRUE),
+  puntuacion_media_normal = mean(c1$sentiment_score_normal, na.rm = TRUE),
+  stringsAsFactors = FALSE
+)
+resumen_c1
+```
+
+La puntuación media del cluster es un 7.43 y la media normalizada escalada es 2.15. Tiene buenas puntuaciones en todo el cluster, y la mayoría de las reseñas son positivas (98%). Hay más reseñas negativas que neutrales.
+
+## Cluster 2
+
+Este cluster tiene 17 barrios. Contiene zonas universitarias y zonas bien comunicadas, podemos decir que vienen los estudiantes en este cluster.
+
+```{r c2}
+
+c2 <- read.csv("cluster2.csv")
+
+#Cogemos las viviendas de los barrios del cluster 2 y agrupamos por barrio
+c2 <- val_trad[val_trad$neighbourhood_cleansed %in% c2$barrio, ]
+
+#Guardamos los barrios
+barrios_c2 <- unique(c2$neighbourhood_cleansed)
+```
+
+```{r c2 sentiment + afinn, message=FALSE, warning=FALSE}
+#sentiments_c2 <- analyzeSentiment(c2$comments_all)
+labels_c2 <- convertToDirection(sentiments_c2$SentimentQDAP) 
+
+c2 <- c2 %>%
+  mutate(
+    sentiment = labels_c2
+  )
+
+rm(sentiments_c2, labels_c2)
+
+# Modificar el data para que sea compatible con tidy 
+tidy_reviews_c2 <- c2 %>%
+  select(review_id, comments_all) %>%
+  unnest_tokens(word, comments_all)
+
+# Filtrar stopwords y palabras con numeros de tokens
+tidy_reviews_c2 <- tidy_reviews_c2 %>% 
+                filter(!grepl('[0-9]',word)) %>%
+                anti_join(stop_words)
+
+# Unir el lexicon afinn con el data tidy
+sentiments_afinn_c2 <- tidy_reviews_c2 %>%
+  inner_join(afinn, by = "word")
+
+# Calcular el score para cada resena
+sentiments_afinn_c2 <- sentiments_afinn_c2 %>%
+  group_by(review_id) %>%
+  summarize(sentiment_score = sum(value))
+
+# Unir el sentimiento con el data
+c2 <- inner_join(c2, sentiments_afinn_c2, by = "review_id")
+rm(sentiments_afinn_c2)
+
+# Visualizar los scores
+afinn_c2 <- ggplot(c2, aes(x = sentiment_score)) +
+  geom_histogram(binwidth = 1, fill = "lightblue", color = "black") +
+  scale_x_continuous(breaks = seq(-20, 20, 5), limits = c(-20, 20)) +
+  scale_y_continuous(label = comma) +
+  labs(x = "Puntuación de la Reseña", y = "Contado", title = "Distribución de las Puntuaciones usando AFINN Lexicón en Cluster 2")
+afinn_c2
+```
+
+La distribución de las puntuaciones parece ser más normal pero sigue apareciendo un poco de sesgo positivo. Tiene más reseñas negativas y las puntuaciones están alrededor de 2 hasta 8. 
+
+```{r c2 bing, message=FALSE, warning=FALSE}
+bing_word_counts_c2 <- tidy_reviews_c2 %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+bing_c2 <- bing_word_counts_c2 %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribución al Sentimiento",
+       y = NULL,
+       title = "Cluster 2")
+rm(tidy_reviews_c2, bing_word_counts_c2)
+bing_c2
+```
+
+Las palabras positivas que más contribuyen son "*limpio*" y "*agradable*". Después, hay "*perfecto*", "*recomendable*", "*cómodo*" y "*bello*". Hay una palabra nueva que es "*fácil*", aunque no sabemos tampoco el contexto otra vez (puede ser el host, bien comunicada, etc.).
+Las palabras negativas que contribuyen más son relacionados con *ruido* y después *problemas* otra vez. Hay una palabra nueva que es "*olor*", que significa que a lo mejor los barrios de este cluster tienen un problema con las tuberías.
+
+```{r c2 normalizar + dataframe}
+media_c2 <- mean(c2$sentiment_score) 
+c2$sentiment_score_normal <- (c2$sentiment_score - media_c2) / sd(c2$sentiment_score) 
+score_min <- min(c2$sentiment_score_normal, na.rm = TRUE)
+score_max <- max(c2$sentiment_score_normal, na.rm = TRUE)
+c2$sentiment_score_normal <- (c2$sentiment_score_normal - score_min) / (score_max - score_min) * 5
+rm(media_c2)
+
+resumen_c2 <- data.frame(
+  negative = sum(c2$sentiment == "negative"),
+  neutral = sum(c2$sentiment == "neutral"),
+  positive = sum(c2$sentiment == "positive"),
+  puntuacion_media = mean(c2$sentiment_score, na.rm = TRUE),
+  puntuacion_media_normal = mean(c2$sentiment_score_normal, na.rm = TRUE),
+  stringsAsFactors = FALSE
+)
+resumen_c2
+```
+
+La puntuación media del cluster es 6.84 y la media normalizada escalada es 1.54. La mayoría de las reseñas son positivas (97.5%). Hay más reseñas neutrales que negativas.
+
+## Cluster 3
+
+Hay 18 barrios en este cluster. Tiene los barrios un nivel más alejado a los barrios turísticos, o sea no están directamente en la acción pero cerca.
+
+```{r c3}
+
+c3 <- read.csv("cluster3.csv")
+
+#Cogemos las viviendas de los barrios del cluster 3 y agrupamos por barrio
+c3 <- val_trad[val_trad$neighbourhood_cleansed %in% c3$barrio, ]
+
+#Guardamos los barrios
+barrios_c3 <- unique(c3$neighbourhood_cleansed)
+```
+
+```{r c3 sentiment + afinn, message=FALSE, warning=FALSE}
+#sentiments_c3 <- analyzeSentiment(c3$comments_all)
+labels_c3 <- convertToDirection(sentiments_c3$SentimentQDAP) 
+
+c3 <- c3 %>%
+  mutate(
+    sentiment = labels_c3
+  )
+
+rm(sentiments_c3, labels_c3)
+
+# Modificar el data para que sea compatible con tidy 
+tidy_reviews_c3 <- c3 %>%
+  select(review_id, comments_all) %>%
+  unnest_tokens(word, comments_all)
+
+# Filtrar stopwords y palabras con numeros de tokens
+tidy_reviews_c3 <- tidy_reviews_c3 %>% 
+                filter(!grepl('[0-9]',word)) %>%
+                anti_join(stop_words)
+
+# Unir el lexicon afinn con el data tidy
+sentiments_afinn_c3 <- tidy_reviews_c3 %>%
+  inner_join(afinn, by = "word")
+
+# Calcular el score para cada resena
+sentiments_afinn_c3 <- sentiments_afinn_c3 %>%
+  group_by(review_id) %>%
+  summarize(sentiment_score = sum(value))
+
+# Unir el sentimiento con el data
+c3 <- inner_join(c3, sentiments_afinn_c3, by = "review_id")
+rm(sentiments_afinn_c3)
+
+# Visualizar los scores
+afinn_c3 <- ggplot(c3, aes(x = sentiment_score)) +
+  geom_histogram(binwidth = 1, fill = "lightblue", color = "black") +
+  scale_x_continuous(breaks = seq(-20, 20, 5), limits = c(-20, 20)) +
+  scale_y_continuous(label = comma) +
+  labs(x = "Puntuación de la Reseña", y = "Contado", title = "Distribución de las Puntuaciones usando AFINN Lexicón en Cluster 3")
+afinn_c3
+```
+
+La distribución del cluster 3 está sesgada positivamente. Hay más puntuaciones negativas y tienen una cuantificación mayor, incluso casi -15, aunque la mayoría están entre 2 y 8.
+
+```{r c3 bing, message=FALSE, warning=FALSE}
+bing_word_counts_c3 <- tidy_reviews_c3 %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+bing_c3 <- bing_word_counts_c3 %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribución al Sentimiento",
+       y = NULL,
+       title = "Cluster 3")
+rm(tidy_reviews_c3, bing_word_counts_c3)
+bing_c3
+```
+
+En el cluster 3, las top dos palabras son *"limpio"* y *"agradable"* otra vez. Lugeo son "*recomendable*", *"perfecto"*, y *"cómodo."* Finalmente las últimas cinco palabras son "*excelente*", *"bello"*, *"fácil"*, *"súper"*, y *"silencioso."*
+En cuánto las palabras negativas, el *ruido* sigue siendo un problema, también las reseñas hablan de *problemas* y *dudas* otra vez. En este cluster de barrios, hay un problema con *olor* y un poco de *suciedad.*
+
+```{r c3 normalizar + dataframe}
+media_c3 <- mean(c3$sentiment_score) 
+c3$sentiment_score_normal <- (c3$sentiment_score - media_c3) / sd(c3$sentiment_score) 
+score_min <- min(c3$sentiment_score_normal, na.rm = TRUE)
+score_max <- max(c3$sentiment_score_normal, na.rm = TRUE)
+c3$sentiment_score_normal <- (c3$sentiment_score_normal - score_min) / (score_max - score_min) * 5
+rm(media_c3)
+
+resumen_c3 <- data.frame(
+  negative = sum(c3$sentiment == "negative"),
+  neutral = sum(c3$sentiment == "neutral"),
+  positive = sum(c3$sentiment == "positive"),
+  puntuacion_media = mean(c3$sentiment_score, na.rm = TRUE),
+  puntuacion_media_normal = mean(c3$sentiment_score_normal, na.rm = TRUE),
+  stringsAsFactors = FALSE
+)
+resumen_c3
+```
+
+La puntuación media del cluster 3 es 6.77 y la media normalizada escalada es 2.03. La mayoría de las reseñas son positivas (97.3%). Hay más reseñas neutrales que negativas.
+
+
+## Cluster 4
+
+El último cluster tiene 24 barrios. Este cluster incluye barrios del puerto y la playa, y barrios céntricos. Podemos decir que son los barrios turísticos.
+
+```{r c4}
+
+c4 <- read.csv("cluster4.csv")
+
+#Cogemos las viviendas de los barrios del cluster 4 y agrupamos por barrio
+c4 <- val_trad[val_trad$neighbourhood_cleansed %in% c4$barrio, ]
+
+#Guardamos los barrios
+barrios_c4 <- unique(c4$neighbourhood_cleansed)
+rm(val_trad)
+```
+
+```{r c4 sentiment + afinn, message=FALSE, warning=FALSE}
+#c4_1 <- c4[1:75000, ]
+#c4_2 <- c4[75001:147885, ]
+#sentiments_c4_1 <- analyzeSentiment(c4_1$comments_all)
+#sentiments_c4_2 <- analyzeSentiment(c4_2$comments_all)
+#sentiments_c4 <- rbind(sentiments_c4_1, sentiments_c4_2)
+labels_c4 <- convertToDirection(sentiments_c4$SentimentQDAP) 
+
+c4 <- c4 %>%
+  mutate(
+    sentiment = labels_c4,
+  )
+
+rm(sentiments_c4_1, labels_c4_1, sentiments_c4_2, labels_c4_2, labels_c4, c4_1, c4_2, sentiments_c4)
+
+# Modificar el data para que sea compatible con tidy 
+tidy_reviews_c4 <- c4 %>%
+  select(review_id, comments_all) %>%
+  unnest_tokens(word, comments_all)
+
+# Filtrar stopwords y palabras con numeros de tokens
+tidy_reviews_c4 <- tidy_reviews_c4 %>% 
+                filter(!grepl('[0-9]',word)) %>%
+                anti_join(stop_words)
+
+# Unir el lexicon afinn con el data tidy
+sentiments_afinn_c4 <- tidy_reviews_c4 %>%
+  inner_join(afinn, by = "word")
+
+# Calcular el score para cada resena
+sentiments_afinn_c4 <- sentiments_afinn_c4 %>%
+  group_by(review_id) %>%
+  summarize(sentiment_score = sum(value))
+
+# Unir el sentimiento con el data
+c4 <- inner_join(c4, sentiments_afinn_c4, by = "review_id")
+rm(sentiments_afinn_c4)
+
+# Visualizar los scores
+afinn_c4 <- ggplot(c4, aes(x = sentiment_score)) +
+  geom_histogram(binwidth = 1, fill = "lightblue", color = "black") +
+  scale_x_continuous(breaks = seq(-20, 20, 5), limits = c(-20, 20)) +
+  scale_y_continuous(label = comma) +
+  labs(x = "Puntuación de la Reseña", y = "Contado", title = "Distribución de las Puntuaciones usando AFINN Lexicón en Cluster 4")
+afinn_c4
+```
+
+La distribución del cluster 4 está sesgada positivamente. Hay más puntuaciones negativas pero menos frecuentes en totales y tienen una cuantificación mayor, incluso casi -15, aunque la mayoría siguen estando entre 2 y 8.
+
+```{r c4 bing, message=FALSE, warning=FALSE}
+bing_word_counts_c4 <- tidy_reviews_c4 %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+bing_c4 <- bing_word_counts_c4 %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribución al Sentimiento",
+       y = NULL,
+       title = "Cluster 4")
+rm(tidy_reviews_c4, bing_word_counts_c4)
+bing_c4
+```
+
+En el cluster 4, las top dos palabras son *"limpio"* y *"agradable"* otra vez, como el resto de los clusters. Lugeo son "*recomendable*", *"perfecto"*, y *"cómodo."* Finalmente las últimas cinco palabras son *"bello"*, *"fácil"*, *"súper"*, *"excelente"*, y *"atento"*. La última palabra se refiere al propietario del piso y indica que los propietarios de este cluster están atentos a sus viviendas y sus huéspedes. 
+En cuánto las palabras negativas, el *ruido* sigue siendo un problema, también las reseñas hablan de *problemas* como en los demás clusters. En este cluster de barrios, hay un problema con *olor* también y un poco de *frío.*
+
+```{r c4 normalizar + dataframe}
+media_c4 <- mean(c4$sentiment_score) 
+c4$sentiment_score_normal <- (c4$sentiment_score - media_c4) / sd(c4$sentiment_score) 
+score_min <- min(c4$sentiment_score_normal, na.rm = TRUE)
+score_max <- max(c4$sentiment_score_normal, na.rm = TRUE)
+c4$sentiment_score_normal <- (c4$sentiment_score_normal - score_min) / (score_max - score_min) * 5
+rm(media_c4)
+
+resumen_c4 <- data.frame(
+  negative = sum(c4$sentiment == "negative", na.rm = TRUE),
+  neutral = sum(c4$sentiment == "neutral", na.rm = TRUE),
+  positive = sum(c4$sentiment == "positive", na.rm = TRUE),
+  puntuacion_media = mean(c4$sentiment_score, na.rm = TRUE),
+  puntuacion_media_normal = mean(c4$sentiment_score_normal, na.rm = TRUE),
+  stringsAsFactors = FALSE
+)
+resumen_c4
+```
+
+La puntuación media del cluster 4 es 6.96 y la media normalizada escalada es 1.19. La mayoría de las reseñas son positivas (97.3%). Hay más reseñas neutrales que negativas pero la proporción sigue igual.
+
+
+## Comparando los clusters
+
+Ahora vamos a comparar los datos de todos los clusters juntos.
+
+```{r resumen clusters}
+resumen_clusters <- rbind(resumen_c1, resumen_c2, resumen_c3, resumen_c4)
+rownames(resumen_clusters) <- c("Cluster 1", "Cluster 2", "Cluster 3", "Cluster 4")
+resumen_clusters
+```
+
+Parece que la puntuación media más alta es del cluster 1, tanto antes y después de normalizar y escalarla. Luego, mirando las puntuaciones medias siguen el orden de cluster 4 > cluster 2 > cluster 3, pero después del proceso de normalización y escalación el orden realmente es cluster 3 > cluster 2 > cluster 4. Mirando sus histogramas de las puntuaciones a continuación, se ve que el cluster 4 tiene más desviación y más puntuaciones totales, lo que va a sesgar las estadísticas. Los 4 clusters tiene alto porcentaje de reseñas positivas, con un valor entre 97-98%. Los clusters 2, 3, y 4 tienen más reseñas neutrales que negativos, lo que indica si algo no fuera de todo bien al menos no estaba negativo. En comparación, el cluster 1 sí tiene más reseñas negativas que neutrales. Puede ser por sus ubicaciones que están más lejos al centro de la ciudad y otros monumentos. 
+
+
+```{r afinn todos, message=FALSE, warning=FALSE}
+grid.arrange(afinn_c1, afinn_c2, afinn_c3, afinn_c4, nrow=2)
+```
+
+Las distribuciones de los cuatro clusters siguen la misma distribución: sesgada positivamente. Los clusters 2, 3, y 4 tienen una cola pequeña izquierda de reseñas negativas de -7 hasta incluso -20, que está más corta en el cluster 1 y no llega tanto. Parece que la alta cantidad de reseñas con puntuación alta están camuflando las muy negativas. Los cuatro clusters tienen una agrupación fuerte en las reseñas de 2 a 8, con dos o tres picos. En general, no hay grandes cosas distintas en las distribuciones. 
+
+```{r bing todos, message=FALSE, warning=FALSE}
+grid.arrange(bing_c1, bing_c2, bing_c3, bing_c4, nrow=2)
+```
+
+De las palabras positivas, las top dos son iguales en todos los clusters: *"limpio"* y *"agradable"*. La palabra *"perfecto"* siempre está en el top cuatro también. *"Cómoda"* tiene alta colocación también en los cuatro clusters. La palabra *"silencioso"* está en séptimo lugar en el 1, octavo en el 2, décimo en el 3, y no aparece en el 4. Esto tiene sentido considerando que la palabra negativa que contribuye más es *ruidoso/ruido*. Una palabra destacada del cluster 1 es *recomendable*", en el 2 y el 3 es *fácil*", y el 4 tiene *"atento"*. Esas palabras nos ayuda distinguir las características buenas que mencionan las reseñas. No sabemos el contexo, puede referenciar al host o a la vivienda o incluso al barrio en sí, pero son palabras distintas que caracterizan los clusters.
+
+Las palabras negativas que contribuyen más siempre son *"ruidoso/ruido"* y *"asuntos"*. Dos barríos tienen problema de *frío*: el 1 y el 4. Los clusters 2, 3, y 4 tienen problema de *mal olor*. Sorprendemente, no hay nada relacionada con calor. Nos molesta más el frío que el calor en los AirBnBs según estas reseñas. Interesantemente, el cluster 1 incluye la palabra *"falta"*. Como estos barrios están más alejados, puede referir a un falta de transporte, que hemos visto influye en la caracterización del barrio y el precio.
+
+Podemos ver que las palabras contribuyentes a la puntuación difieren ligeramente entre los clusters, lo que nos ayuda a caracterizarlos. 
+
+## Relaciones entre variables
+
+Para investigar si están relacionadas las reseñas con los clusters, podemos tratar los datos como una tabla de contingencia, cruzando las variables "cluster" y "reseña". Así, podemos aplicar un análisis factorial de correspondencias simple (AFC) para ver la relación, si hay. Aplicamos el test de independencia $\chi^2$ para contrastar la hipótesis nula de independencia entre las variables "cluster" y "reseñas".
+
+```{r chi2}
+resumen_clusters_normal <- subset(resumen_clusters, select = -c(puntuacion_media))
+chisq.test(resumen_clusters, simulate.p.value = TRUE)
+```
+
+Como el test sale significativa con un alfa de 5%, las dos variables son dependientes y existe una relación entre ellas. Aplicamos el AFC.
+
+```{r AFC}
+res.afc = CA(resumen_clusters_normal, graph = FALSE)
+eig.val <- get_eigenvalue(res.afc)
+Vmedia = 100 * (1/nrow(eig.val))       #criterio explica mas que media
+fviz_eig(res.afc, addlabels = TRUE) +
+  geom_hline(yintercept=Vmedia, linetype=2, color="red")
+kable(eig.val, digits = 2)
+res.afc = CA(resumen_clusters_normal, graph = FALSE, ncp = 2)
+```
+
+Sale que la primera componente explica el 97.1% de la inercia total de la tabla y la segundo un 2.9%. Cogemos las dos componentes para ver que está pasando.
+
+```{r afc filas + col}
+# Gráfico de filas
+fviz_ca_row(res.afc, axes = c(1,2), repel = TRUE, col.row = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"))
+# Gráfico de columnas
+fviz_ca_col(res.afc, axes = c(1,2), repel = TRUE, col.col = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"))
+```
+
+Según el primer gráfico de las filas, el cluster más influyente en la primera componente principal es el cluster 1. Los clusters 2 no tienen relación, y el cluster 3 tiene una pequeña influencia positiva en la primera componente y negativa en la segunda. En el segundo gráfico de las columnas el factor que influye más es la puntuación media normalizada escalada. Luego las reseñas neutrales y negativas no tienen relación, y tampoco las positivas. 
+
+```{r afc biplot + contrib}
+kable(res.afc$row$contrib)
+fviz_ca_biplot(res.afc, repel = TRUE)
+```
+
+En la tabla de contribuciones, la primera componente principal está compuesta por el cluster 1 y un poco del cluster 4. En la segunda componente está compuesta por los clusters 2 y 4. El cluster 3 apenas contribuyen a la primera y muy poca a la segunda. 
+
+En el biplot simétrico, podemos ver la distancia entre los clusters o entre las reseñas pero no entre un cluster y una reseña. Sí podemos comprobar visualmente las contribuciones de cada variable. 
+
+```{r afc biplot asimetrico filas}
+# Columnas representadas en espacio de las filas
+fviz_ca_biplot(res.afc, map ="rowprincipal", repel = TRUE) 
+```
+
+```{r afc biplot asimetrico cols}
+# Filas representadas en espacio de las columnas
+fviz_ca_biplot(res.afc, map ="colprincipal", repel = TRUE) 
+```
+
+Los clusters 1 y 3 tienden a tener mayor puntuación media que los clusters 2 y 4. Los clusters 1 y 3 tienden a tener reseñas positivas, el 2 reseñas neutrales, y el 4 tiende a tener más reseñas negativas y menos puntuación media. 
+
+La variable que más influye en el análisis de las reseñas y los clusters es la puntuación media.
+
+
+# Hispanohablantes vs. no Hispanohablantes
+
+Ahora vamos a analizar las diferencias entre las reseñas de hispanohablantes y no hispanohablantes. Como Valencia es una ciudad muy turística y estamos analizando pisos completos alquilados en AirBnB, sería interesante ver si hay diferencia entre las turistas de España y Sur América y el resto de las turistas. En el fichero original de reseñas, teníamos las reseñas en su idioma original. Con el proceso de la traducción todos están en inglés para analizar. Es el mismo proceso que hemos hecho antes, pero partiendo la base de datos entre las reseñas etiquetadas como "es" con el paquete cld3 o distinto de este código. 
+
+# Cluster 1
+
+```{r c1 idioma}
+hispanohablantes_c1 = subset(c1, (cld3 == 'es'))
+no_hispanohablantes_c1 = subset(c1, (cld3 != 'es'))
+```
+
+```{r c1 idioma afinn, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Visualizar los scores
+afinn_c1_hisp <- ggplot(hispanohablantes_c1, aes(x = sentiment_score)) +
+  geom_histogram(binwidth = 1, fill = "lightblue", color = "black") +
+  scale_x_continuous(breaks = seq(-20, 20, 5), limits = c(-20, 20)) +
+  scale_y_continuous(label = comma) +
+  labs(x = "Puntuación de la Reseña Hisp C1", y = "Contado", title = "Hispanohablantes C1")
+
+afinn_c1_no_hisp <- ggplot(no_hispanohablantes_c1, aes(x = sentiment_score)) +
+  geom_histogram(binwidth = 1, fill = "lightblue", color = "black") +
+  scale_x_continuous(breaks = seq(-20, 20, 5), limits = c(-20, 20)) +
+  scale_y_continuous(label = comma) +
+  labs(x = "Puntuación de la Reseña NoHisp C1", y = "Contado", title = "No Hispanohablantes C1")
+
+grid.arrange(afinn_c1_hisp, afinn_c1_no_hisp)
+
+```
+
+```{r c1 idioma bing, message=FALSE, warning=FALSE}
+
+# Modificar el data para que sea compatible con tidy 
+tidy_reviews_c1_hisp <- hispanohablantes_c1 %>%
+  select(review_id, comments_all) %>%
+  unnest_tokens(word, comments_all)
+
+# Filtrar stopwords y palabras con numeros de tokens
+tidy_reviews_c1_hisp <- tidy_reviews_c1_hisp %>% 
+                filter(!grepl('[0-9]',word)) %>%
+                anti_join(stop_words)
+
+tidy_reviews_c1_hisp <- tidy_reviews_c1_hisp %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+tidy_reviews_c1_hisp <- tidy_reviews_c1_hisp %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribución al Sentimiento",
+       y = NULL,
+       title = "Hisp C1")
+
+# Modificar el data para que sea compatible con tidy 
+tidy_reviews_c1_nohisp <- no_hispanohablantes_c1 %>%
+  select(review_id, comments_all) %>%
+  unnest_tokens(word, comments_all)
+
+# Filtrar stopwords y palabras con numeros de tokens
+tidy_reviews_c1_nohisp <- tidy_reviews_c1_nohisp %>% 
+                filter(!grepl('[0-9]',word)) %>%
+                anti_join(stop_words)
+
+tidy_reviews_c1_nohisp <- tidy_reviews_c1_nohisp %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+tidy_reviews_c1_nohisp <- tidy_reviews_c1_nohisp %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribución al Sentimiento",
+       y = NULL,
+       title = "NoHisp C1")
+
+grid.arrange(tidy_reviews_c1_hisp, tidy_reviews_c1_nohisp)
+```
+
+```{r c1 idioma resumen}
+media_c1_hisp <- mean(hispanohablantes_c1$sentiment_score) 
+hispanohablantes_c1$sentiment_score_normal <- (hispanohablantes_c1$sentiment_score - media_c1_hisp) / sd(hispanohablantes_c1$sentiment_score) 
+score_min <- min(hispanohablantes_c1$sentiment_score_normal, na.rm = TRUE)
+score_max <- max(hispanohablantes_c1$sentiment_score_normal, na.rm = TRUE)
+hispanohablantes_c1$sentiment_score_normal <- (hispanohablantes_c1$sentiment_score_normal - score_min) / (score_max - score_min) * 5
+
+resumen_c1_hisp <- data.frame(
+  negative = sum(hispanohablantes_c1$sentiment == "negative", na.rm = TRUE),
+  neutral = sum(hispanohablantes_c1$sentiment == "neutral", na.rm = TRUE),
+  positive = sum(hispanohablantes_c1$sentiment == "positive", na.rm = TRUE),
+  puntuacion_media_normal = mean(hispanohablantes_c1$sentiment_score_normal, na.rm = TRUE) * 5,
+  stringsAsFactors = FALSE
+)
+
+media_c1_nohisp <- mean(no_hispanohablantes_c1$sentiment_score) 
+no_hispanohablantes_c1$sentiment_score_normal <- (no_hispanohablantes_c1$sentiment_score - media_c1_nohisp) / sd(no_hispanohablantes_c1$sentiment_score) 
+score_min <- min(no_hispanohablantes_c1$sentiment_score_normal, na.rm = TRUE)
+score_max <- max(no_hispanohablantes_c1$sentiment_score_normal, na.rm = TRUE)
+no_hispanohablantes_c1$sentiment_score_normal <- (no_hispanohablantes_c1$sentiment_score_normal - score_min) / (score_max - score_min) * 5
+
+resumen_c1_nohisp <- data.frame(
+  negative = sum(no_hispanohablantes_c1$sentiment == "negative", na.rm = TRUE),
+  neutral = sum(no_hispanohablantes_c1$sentiment == "neutral", na.rm = TRUE),
+  positive = sum(no_hispanohablantes_c1$sentiment == "positive", na.rm = TRUE),
+  puntuacion_media_normal = mean(no_hispanohablantes_c1$sentiment_score_normal, na.rm = TRUE) * 5,
+  stringsAsFactors = FALSE
+)
+resumen_c1_idioma <- rbind(resumen_c1_hisp, resumen_c1_nohisp)
+rm(resumen_c1_hisp, resumen_c1_nohisp, media_c1_hisp, media_c1_nohisp)
+rownames(resumen_c1_idioma) <- c("Hispanohablantes C1", "No hispanohablantes C1")
+resumen_c1_idioma
+```
+
+En la distribución del cluster 1, los no hispanohablantes tienen una cola más larga de reseñas con puntuaciones negativas que los hispanohablantes. Además, es bastante sesgada positivamente. La puntuación media de los no hispanohablantes es más de dos veces más alta que los hispanohablantes. Tienen más reseñas negativas que neutrales, y el mismo en los hispanohablantes, aunque en los dos la mayoría son positivas. 
+
+Analizando las palabras, por la primera vez la palabra positiva más contribuyente es *"cómodo"* en los hispanohablantes, y sigue siendo *"agradable"* con los no hispanohablantes. Interesantemente, en los no hispanohablantes sale una nueva palabra: *"espacioso"*. Al ser barrios más alejadas de la ciudad, son propiedades más amplios, lo que agradezca los extranjeros. 
+
+Las palabras negativas para destacar son *"falta"* en los hispanohablantes, *"frío"* y *"olor"* en los no hispanohablantes. Los extranjeros quejan de la temperatura y olores malos, mientras que los hispanohablantes sienten que algo está faltando las viviendas de estos barrios.
+
+# Cluster 2
+
+```{r c2 idioma}
+hispanohablantes_c2 = subset(c2, (cld3 == 'es'))
+no_hispanohablantes_c2 = subset(c2, (cld3 != 'es'))
+```
+
+```{r c2 idioma afinn, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Visualizar los scores
+afinn_c2_hisp <- ggplot(hispanohablantes_c2, aes(x = sentiment_score)) +
+  geom_histogram(binwidth = 1, fill = "lightblue", color = "black") +
+  scale_x_continuous(breaks = seq(-20, 20, 5), limits = c(-20, 20)) +
+  scale_y_continuous(label = comma) +
+  labs(x = "Puntuación de la Reseña Hisp C2", y = "Contado", title = "Hispanohablantes C2")
+
+afinn_c2_no_hisp <- ggplot(no_hispanohablantes_c2, aes(x = sentiment_score)) +
+  geom_histogram(binwidth = 1, fill = "lightblue", color = "black") +
+  scale_x_continuous(breaks = seq(-20, 20, 5), limits = c(-20, 20)) +
+  scale_y_continuous(label = comma) +
+  labs(x = "Puntuación de la Reseña NoHisp C2", y = "Contado", title = "No Hispanohablantes C2")
+
+grid.arrange(afinn_c2_hisp, afinn_c2_no_hisp)
+
+```
+
+
+```{r c2 idioma bing, message=FALSE, warning=FALSE}
+
+# Modificar el data para que sea compatible con tidy 
+tidy_reviews_c2_hisp <- hispanohablantes_c2 %>%
+  select(review_id, comments_all) %>%
+  unnest_tokens(word, comments_all)
+
+# Filtrar stopwords y palabras con numeros de tokens
+tidy_reviews_c2_hisp <- tidy_reviews_c2_hisp %>% 
+                filter(!grepl('[0-9]',word)) %>%
+                anti_join(stop_words)
+
+tidy_reviews_c2_hisp <- tidy_reviews_c2_hisp %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+tidy_reviews_c2_hisp <- tidy_reviews_c2_hisp %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribución al Sentimiento",
+       y = NULL,
+       title = "Hisp C2")
+
+# Modificar el data para que sea compatible con tidy 
+tidy_reviews_c2_nohisp <- no_hispanohablantes_c2 %>%
+  select(review_id, comments_all) %>%
+  unnest_tokens(word, comments_all)
+
+# Filtrar stopwords y palabras con numeros de tokens
+tidy_reviews_c2_nohisp <- tidy_reviews_c2_nohisp %>% 
+                filter(!grepl('[0-9]',word)) %>%
+                anti_join(stop_words)
+
+tidy_reviews_c2_nohisp <- tidy_reviews_c2_nohisp %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+tidy_reviews_c2_nohisp <- tidy_reviews_c2_nohisp %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribución al Sentimiento",
+       y = NULL,
+       title = "NoHisp C2")
+
+grid.arrange(tidy_reviews_c2_hisp, tidy_reviews_c2_nohisp)
+```
+
+```{r c2 idioma resumen}
+media_c2_hisp <- mean(hispanohablantes_c2$sentiment_score) 
+hispanohablantes_c2$sentiment_score_normal <- (hispanohablantes_c2$sentiment_score - media_c2_hisp) / sd(hispanohablantes_c2$sentiment_score) 
+score_min <- min(hispanohablantes_c2$sentiment_score_normal, na.rm = TRUE)
+score_max <- max(hispanohablantes_c2$sentiment_score_normal, na.rm = TRUE)
+hispanohablantes_c2$sentiment_score_normal <- (hispanohablantes_c2$sentiment_score_normal - score_min) / (score_max - score_min) * 5
+
+resumen_c2_hisp <- data.frame(
+  negative = sum(hispanohablantes_c2$sentiment == "negative", na.rm = TRUE),
+  neutral = sum(hispanohablantes_c2$sentiment == "neutral", na.rm = TRUE),
+  positive = sum(hispanohablantes_c2$sentiment == "positive", na.rm = TRUE),
+  puntuacion_media_normal = mean(hispanohablantes_c2$sentiment_score_normal, na.rm = TRUE) * 5,
+  stringsAsFactors = FALSE
+)
+
+media_c2_nohisp <- mean(no_hispanohablantes_c2$sentiment_score) 
+no_hispanohablantes_c2$sentiment_score_normal <- (no_hispanohablantes_c2$sentiment_score - media_c2_nohisp) / sd(no_hispanohablantes_c2$sentiment_score) 
+score_min <- min(no_hispanohablantes_c2$sentiment_score_normal, na.rm = TRUE)
+score_max <- max(no_hispanohablantes_c2$sentiment_score_normal, na.rm = TRUE)
+no_hispanohablantes_c2$sentiment_score_normal <- (no_hispanohablantes_c2$sentiment_score_normal - score_min) / (score_max - score_min) * 5
+
+resumen_c2_nohisp <- data.frame(
+  negative = sum(no_hispanohablantes_c2$sentiment == "negative", na.rm = TRUE),
+  neutral = sum(no_hispanohablantes_c2$sentiment == "neutral", na.rm = TRUE),
+  positive = sum(no_hispanohablantes_c2$sentiment == "positive", na.rm = TRUE),
+  puntuacion_media_normal = mean(no_hispanohablantes_c2$sentiment_score_normal, na.rm = TRUE) * 5,
+  stringsAsFactors = FALSE
+)
+resumen_c2_idioma <- rbind(resumen_c2_hisp, resumen_c2_nohisp)
+rm(resumen_c2_hisp, resumen_c2_nohisp, media_c2_nohisp, media_c2_hisp)
+rownames(resumen_c2_idioma) <- c("Hispanohablantes C2", "No hispanohablantes C2")
+resumen_c2_idioma
+
+```
+
+Las distribuciones del cluster 2 tienen la misma forma, aunque los hispanohablantes tienen reseñas con puntuaciones negativas más altas que los no hispanohablantes. Además, son bastante sesgadas positivamente. La puntuación media de los dos grupos son casi iguales. Tienen más reseñas neutrales que negativas los dos, aunque la mayoría son positivas. 
+
+Analizando las palabras, no hay mucha diferencia entre las palabras de los dos grupos. Los hispanohablantes hablan más del propietario (*"atento"* y *"amistoso"*) mientras que los no hispanohablantes hablan más de la facilidad y comodidad (*"fácil"* y *"agradable"*). 
+
+Tampoco hay diferencias entre las palabras negativas. Las tres palabras destacables son *"ruido"* y *"frío"*, y *"olor"*.
+
+# Cluster 3
+
+```{r c3 idioma}
+hispanohablantes_c3 = subset(c3, (cld3 == 'es'))
+no_hispanohablantes_c3 = subset(c3, (cld3 != 'es'))
+```
+
+```{r c3 idioma afinn, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Visualizar los scores
+afinn_c3_hisp <- ggplot(hispanohablantes_c3, aes(x = sentiment_score)) +
+  geom_histogram(binwidth = 1, fill = "lightblue", color = "black") +
+  scale_x_continuous(breaks = seq(-20, 20, 5), limits = c(-20, 20)) +
+  scale_y_continuous(label = comma) +
+  labs(x = "Puntuación de la Reseña Hisp C3", y = "Contado", title = "Hispanohablantes C3")
+
+afinn_c3_no_hisp <- ggplot(no_hispanohablantes_c3, aes(x = sentiment_score)) +
+  geom_histogram(binwidth = 1, fill = "lightblue", color = "black") +
+  scale_x_continuous(breaks = seq(-20, 20, 5), limits = c(-20, 20)) +
+  scale_y_continuous(label = comma) +
+  labs(x = "Puntuación de la Reseña NoHisp C3", y = "Contado", title = "NoHispanohablantes C3")
+
+grid.arrange(afinn_c3_hisp, afinn_c3_no_hisp)
+
+```
+
+
+```{r c3 idioma bing, message=FALSE, warning=FALSE}
+
+# Modificar el data para que sea compatible con tidy 
+tidy_reviews_c3_hisp <- hispanohablantes_c3 %>%
+  select(review_id, comments_all) %>%
+  unnest_tokens(word, comments_all)
+
+# Filtrar stopwords y palabras con numeros de tokens
+tidy_reviews_c3_hisp <- tidy_reviews_c3_hisp %>% 
+                filter(!grepl('[0-9]',word)) %>%
+                anti_join(stop_words)
+
+tidy_reviews_c3_hisp <- tidy_reviews_c3_hisp %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+tidy_reviews_c3_hisp <- tidy_reviews_c3_hisp %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribución al Sentimiento",
+       y = NULL,
+       title = "Hisp C3")
+
+# Modificar el data para que sea compatible con tidy 
+tidy_reviews_c3_nohisp <- no_hispanohablantes_c3 %>%
+  select(review_id, comments_all) %>%
+  unnest_tokens(word, comments_all)
+
+# Filtrar stopwords y palabras con numeros de tokens
+tidy_reviews_c3_nohisp <- tidy_reviews_c3_nohisp %>% 
+                filter(!grepl('[0-9]',word)) %>%
+                anti_join(stop_words)
+
+tidy_reviews_c3_nohisp <- tidy_reviews_c3_nohisp %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+tidy_reviews_c3_nohisp <- tidy_reviews_c3_nohisp %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribución al Sentimiento",
+       y = NULL,
+       title = "NoHisp C3")
+
+grid.arrange(tidy_reviews_c3_hisp, tidy_reviews_c3_nohisp)
+```
+
+```{r c3 idioma resumen}
+media_c3_hisp <- mean(hispanohablantes_c3$sentiment_score) 
+hispanohablantes_c3$sentiment_score_normal <- (hispanohablantes_c3$sentiment_score - media_c3_hisp) / sd(hispanohablantes_c3$sentiment_score) 
+score_min <- min(hispanohablantes_c3$sentiment_score_normal, na.rm = TRUE)
+score_max <- max(hispanohablantes_c3$sentiment_score_normal, na.rm = TRUE)
+hispanohablantes_c3$sentiment_score_normal <- (hispanohablantes_c3$sentiment_score_normal - score_min) / (score_max - score_min) * 5
+
+resumen_c3_hisp <- data.frame(
+  negative = sum(hispanohablantes_c3$sentiment == "negative", na.rm = TRUE),
+  neutral = sum(hispanohablantes_c3$sentiment == "neutral", na.rm = TRUE),
+  positive = sum(hispanohablantes_c3$sentiment == "positive", na.rm = TRUE),
+  puntuacion_media_normal = mean(hispanohablantes_c3$sentiment_score_normal, na.rm = TRUE) * 5,
+  stringsAsFactors = FALSE
+)
+
+media_c3_nohisp <- mean(no_hispanohablantes_c3$sentiment_score) 
+no_hispanohablantes_c3$sentiment_score_normal <- (no_hispanohablantes_c3$sentiment_score - media_c3_nohisp) / sd(no_hispanohablantes_c3$sentiment_score) 
+score_min <- min(no_hispanohablantes_c3$sentiment_score_normal, na.rm = TRUE)
+score_max <- max(no_hispanohablantes_c3$sentiment_score_normal, na.rm = TRUE)
+no_hispanohablantes_c3$sentiment_score_normal <- (no_hispanohablantes_c3$sentiment_score_normal - score_min) / (score_max - score_min) * 5
+
+resumen_c3_nohisp <- data.frame(
+  negative = sum(no_hispanohablantes_c3$sentiment == "negative", na.rm = TRUE),
+  neutral = sum(no_hispanohablantes_c3$sentiment == "neutral", na.rm = TRUE),
+  positive = sum(no_hispanohablantes_c3$sentiment == "positive", na.rm = TRUE),
+  puntuacion_media_normal = mean(no_hispanohablantes_c3$sentiment_score_normal, na.rm = TRUE) * 5,
+  stringsAsFactors = FALSE
+)
+resumen_c3_idioma <- rbind(resumen_c3_hisp, resumen_c3_nohisp)
+rm(resumen_c3_hisp, resumen_c3_nohisp, media_c3_hisp, media_c3_nohisp)
+rownames(resumen_c3_idioma) <- c("Hispanohablantes C3", "No hispanohablantes C3")
+resumen_c3_idioma
+
+```
+
+
+
+# Cluster 4
+
+```{r c4 idioma}
+hispanohablantes_c4 = subset(c4, (cld3 == 'es'))
+no_hispanohablantes_c4 = subset(c4, (cld3 != 'es'))
+```
+
+```{r c4 idioma afinn, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Visualizar los scores
+afinn_c4_hisp <- ggplot(hispanohablantes_c4, aes(x = sentiment_score)) +
+  geom_histogram(binwidth = 1, fill = "lightblue", color = "black") +
+  scale_x_continuous(breaks = seq(-20, 20, 5), limits = c(-20, 20)) +
+  scale_y_continuous(label = comma) +
+  labs(x = "Puntuación de la Reseña Hisp C4", y = "Contado", title = "Hispanohablantes C4")
+
+afinn_c4_no_hisp <- ggplot(no_hispanohablantes_c4, aes(x = sentiment_score)) +
+  geom_histogram(binwidth = 1, fill = "lightblue", color = "black") +
+  scale_x_continuous(breaks = seq(-20, 20, 5), limits = c(-20, 20)) +
+  scale_y_continuous(label = comma) +
+  labs(x = "Puntuación de la Reseña NoHisp C4", y = "Contado", title = "NoHispanohablantes C4")
+
+grid.arrange(afinn_c4_hisp, afinn_c4_no_hisp)
+
+```
+
+
+```{r c4 idioma bing, message=FALSE, warning=FALSE}
+
+# Modificar el data para que sea compatible con tidy 
+tidy_reviews_c4_hisp <- hispanohablantes_c4 %>%
+  select(review_id, comments_all) %>%
+  unnest_tokens(word, comments_all)
+
+# Filtrar stopwords y palabras con numeros de tokens
+tidy_reviews_c4_hisp <- tidy_reviews_c4_hisp %>% 
+                filter(!grepl('[0-9]',word)) %>%
+                anti_join(stop_words)
+
+tidy_reviews_c4_hisp <- tidy_reviews_c4_hisp %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+tidy_reviews_c4_hisp <- tidy_reviews_c4_hisp %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribución al Sentimiento",
+       y = NULL,
+       title = "Hisp C4")
+
+# Modificar el data para que sea compatible con tidy 
+tidy_reviews_c4_nohisp <- no_hispanohablantes_c4 %>%
+  select(review_id, comments_all) %>%
+  unnest_tokens(word, comments_all)
+
+# Filtrar stopwords y palabras con numeros de tokens
+tidy_reviews_c4_nohisp <- tidy_reviews_c4_nohisp %>% 
+                filter(!grepl('[0-9]',word)) %>%
+                anti_join(stop_words)
+
+tidy_reviews_c4_nohisp <- tidy_reviews_c4_nohisp %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+tidy_reviews_c4_nohisp <- tidy_reviews_c4_nohisp %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribución al Sentimiento",
+       y = NULL,
+       title = "NoHisp C4")
+
+grid.arrange(tidy_reviews_c4_hisp, tidy_reviews_c4_nohisp)
+```
+
+```{r c4 idioma resumen}
+media_c4_hisp <- mean(hispanohablantes_c4$sentiment_score) 
+hispanohablantes_c4$sentiment_score_normal <- (hispanohablantes_c1$sentiment_score - media_c1_hisp) / sd(hispanohablantes_c1$sentiment_score) 
+score_min <- min(hispanohablantes_c1$sentiment_score_normal, na.rm = TRUE)
+score_max <- max(hispanohablantes_c1$sentiment_score_normal, na.rm = TRUE)
+hispanohablantes_c1$sentiment_score_normal <- (hispanohablantes_c1$sentiment_score_normal - score_min) / (score_max - score_min) * 5
+
+resumen_c1_hisp <- data.frame(
+  negative = sum(hispanohablantes_c1$sentiment == "negative", na.rm = TRUE),
+  neutral = sum(hispanohablantes_c1$sentiment == "neutral", na.rm = TRUE),
+  positive = sum(hispanohablantes_c1$sentiment == "positive", na.rm = TRUE),
+  puntuacion_media_normal = mean(hispanohablantes_c1$sentiment_score_normal, na.rm = TRUE) * 5,
+  stringsAsFactors = FALSE
+)
+
+media_c1_nohisp <- mean(no_hispanohablantes_c1$sentiment_score) 
+no_hispanohablantes_c1$sentiment_score_normal <- (no_hispanohablantes_c1$sentiment_score - media_c1_nohisp) / sd(no_hispanohablantes_c1$sentiment_score) 
+score_min <- min(no_hispanohablantes_c1$sentiment_score_normal, na.rm = TRUE)
+score_max <- max(no_hispanohablantes_c1$sentiment_score_normal, na.rm = TRUE)
+no_hispanohablantes_c1$sentiment_score_normal <- (no_hispanohablantes_c1$sentiment_score_normal - score_min) / (score_max - score_min) * 5
+
+resumen_c1_nohisp <- data.frame(
+  negative = sum(no_hispanohablantes_c1$sentiment == "negative", na.rm = TRUE),
+  neutral = sum(no_hispanohablantes_c1$sentiment == "neutral", na.rm = TRUE),
+  positive = sum(no_hispanohablantes_c1$sentiment == "positive", na.rm = TRUE),
+  puntuacion_media_normal = mean(no_hispanohablantes_c1$sentiment_score_normal, na.rm = TRUE) * 5,
+  stringsAsFactors = FALSE
+)
+resumen_c1_idioma <- rbind(resumen_c1_hisp, resumen_c1_nohisp)
+rm(resumen_c1_hisp, resumen_c1_nohisp, media_c1_hisp, media_c1_nohisp)
+rownames(resumen_c1_idioma) <- c("Hispanohablantes C1", "No hispanohablantes C1")
+resumen_c1_idioma
+
+rm(resumen_c1_hisp, resumen_c1_nohisp)
+```
+
+
+# Conclusiones 
+
+```{r}
+clusters_puntuaciones <- subset(resumen_clusters, select = -c(positive, negative, neutral))
+clusters_puntuaciones
+
+```
+
