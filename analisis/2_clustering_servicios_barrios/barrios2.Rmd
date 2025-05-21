@@ -9,6 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## Objetivo 2
 # LIBRERÍAS
 
 ```{r message=FALSE, warning=FALSE}
@@ -38,8 +39,8 @@ Se han obtenido 3 nuevos datasets, uno de transporte público por barrio, obteni
 
 Primero se procederá a leer los archivos de pisos del estudio anterior y transporte:
 ```{r pisos y transporte}
-pisos = read.csv('pisos_limpios.csv', sep =',')
-transporte = read.csv('transporte.csv', sep = ';')
+pisos = read.csv('pisos_limpios.csv', sep =',')  # Resultado del objetivo 1
+transporte = read.csv('transporte.csv', sep = ';') # Sacado de la pagina del ayuntamiento
 ```
 
 A continuación se va a calcular los centroides de cada barrio a partir del geojson para así poder calcular la distancia exacta del centro del barrio al lugar de interés:
@@ -48,11 +49,12 @@ A continuación se va a calcular los centroides de cada barrio a partir del geoj
 # Cargar el geojson
 barrios <- st_read("valencia.geojson")
 
-# Obtener centroides de los polígonos
+# Obtener centroides de los polígonos (barrios) y extraer sus coordenadas
+#Coge el centro de cada barrio para poder calcular las distancias
 barrios_centroides <- barrios %>% 
   mutate(centroide = st_centroid(geometry)) %>%
-  mutate(lon = st_coordinates(centroide)[,1],
-         lat = st_coordinates(centroide)[,2])
+  mutate(lon = st_coordinates(centroide)[,1], # Extrae longitud
+         lat = st_coordinates(centroide)[,2]) # Extrae latitud
 
 ```
 Ahora se crea un nuevo fichero con los puntos clave que se han elegido para el estudio:
@@ -76,17 +78,18 @@ Para comprobar que las coordenadas son correctas se muestran en un mapa:
 
 ```{r mapa lugares}
 
+# Convierte el data frame a un objeto espacial (sf), usando lon/lat como coordenadas
 lugares_sf <- st_as_sf(puntos_clave, coords = c("lon", "lat"), crs = 4326)
 
-# 4. Crear mapa interactivo
+# Crear mapa 
 leaflet() %>%
-  addProviderTiles("CartoDB.Positron") %>%
+  addProviderTiles("CartoDB.Positron") %>% # Fondo de mapa claro (estilo Positron)
   addPolygons(data = barrios, 
-              color = "#444444", 
-              weight = 1, 
-              fillOpacity = 0.3,
-              label = ~as.character(nombre),  # o el campo correcto para nombre de barrio
-              highlightOptions = highlightOptions(weight = 2, color = "blue", fillOpacity = 0.5)) %>%
+              color = "#444444", # color borde barrios
+              weight = 1,        # Grosor del borde
+              fillOpacity = 0.3, # opacidad del relleno
+              label = ~as.character(nombre),  # nombre barrios
+              highlightOptions = highlightOptions(weight = 2, color = "blue", fillOpacity = 0.5)) %>% # opciones al pasar el raton
   addCircleMarkers(data = lugares_sf, 
                    radius = 6, 
                    color = "red", 
@@ -109,8 +112,8 @@ calcular_distancias <- function(lat_barrio, lon_barrio, puntos) {
 
 # Añadir distancias al dataframe de barrios
 distancias <- barrios_centroides %>%
-  rowwise() %>%
-  mutate(across(c(lat, lon), as.numeric)) %>%
+  rowwise() %>%  # Aplica operaciones fila por fila (por barrio)
+  mutate(across(c(lat, lon), as.numeric)) %>% #Asegura que sea numerico
   mutate(
     distancia_P_Ayuntamiento = calcular_distancias(lat, lon, puntos_clave[1,]),
     distancia_CAC           = calcular_distancias(lat, lon, puntos_clave[2,]),
@@ -135,6 +138,7 @@ distancias_filtrado = distancias %>% select(nombre, distancia_P_Ayuntamiento:las
 ```
 
 ```{r distancias final}
+# Elimina la columna de geometría espacial (spatial data) del dataframe, quedando solo los datos tabulares (sin coordenadas ni objetos espaciales)
 distancias_f <- st_drop_geometry(distancias_filtrado)
 ```
 
@@ -168,19 +172,19 @@ distancias_f$nombre[distancias_f$nombre == "MONTOLIVET"] <- "MONT-OLIVET"
 
 Ahora sí se pueden juntar ambos ficheros, pero antes creamos el fichero barrios_info con la variable barrio y la media de la variable precio_ponderado por cada barrio. Como la variable precio_ponderado daba problemas al estar indicada como carácter, se convierte en numérica y así poder calcular la media:
 
-```{r precio ponderado barrios}
-# Paso 3: cambiar coma decimal por punto
-pisos$precio_ponderado <- gsub(",", ".", pisos$precio_ponderado)
+Como cada vivienda tiene un barrio hay que hacer la media de todos los precios en cada barrio
+Se calcula el precio promedio ponderado por barrio y grupo para obtener una medida representativa del valor típico del precio en cada zona específica.
 
-# Paso 4: convertir a numérico
-pisos$precio_ponderado <- as.numeric(pisos$precio_ponderado)
+```{r precio ponderado barrios}
+pisos$precio_ponderado <- gsub(",", ".", pisos$precio_ponderado) # cambiar coma decimal por punto
+pisos$precio_ponderado <- as.numeric(pisos$precio_ponderado) # convertir a numérico
 
 barrios_info <- pisos %>%
   group_by(neighbourhood_group_cleansed, neighbourhood_cleansed) %>%
   summarise(
-    media = mean(precio_ponderado, na.rm = TRUE)
+    media = mean(precio_ponderado, na.rm = TRUE) # Calcula el precio promedio (media) ponderado en cada grupo/barrio, ignorando NAs
   ) %>%
-  arrange(desc(media))
+  arrange(desc(media))  # Ordena los resultados de mayor a menor precio promedio
 ```
 
 A continuación le añadimos las distancias:
@@ -202,6 +206,7 @@ Como todos los barrios están presentes, se unen ambos ficheros con las variable
 transporte_clean <- transporte %>%
   filter(!is.na(transporte) & transporte != "")  # elimina filas sin tipo transporte
 
+# Agrupa y cuenta 
 transporte_resumen <- transporte_clean %>%
   group_by(nombre, codbarrio, coddistrit, transporte) %>%
   summarise(conteo = n(), .groups = "drop") %>%
@@ -220,12 +225,12 @@ barrios_info <- barrios_info %>%
 Por último se va a proceder a juntar el fichero de renta_media, como en este los nombres de barrios no coinciden con el fichero de barrios hay que juntarlo de otra forma. Con el fichero de transporte se han unido las variables codbarrio y coddistrit, también presentes en renta_media, para ver si coinciden se comprueba si algún par (distrito, barrio) en renta_media no está presente en barrio_info:
 
 ```{r pares únicos}
-# Pairs únicos en barrios_info
+# Pares únicos en barrios_info
 pares_barrios_info <- barrios_info %>%
   select(coddistrit, codbarrio) %>%
   distinct()
 
-# Pairs únicos en renta_media (ajusta nombres según tu dataset)
+# Pares únicos en renta_media 
 pares_renta_media <- renta_media %>%
   select(Codigo_Distrito, Codigo_Barrio) %>%
   distinct()
@@ -369,7 +374,7 @@ vif(modelo)
 ```
 
 ## PCA
-
+Decidimos hacer un PCA 
 ```{r pca}
 barrios_scaled_sinprecio <- subset(barrios_scaled, select = -c(precio))
 res.pca = PCA(barrios_scaled_sinprecio, scale.unit = FALSE, graph = FALSE, ncp = 10)
@@ -630,5 +635,47 @@ write.csv(cluster3,"cluster3.csv")
 write.csv(cluster4,"cluster4.csv")
 
 ```
+
+
+```{r}
+
+
+# Unir los clusters (si están en un objeto separado)
+# Suponiendo que 'barrios_info' contiene el cluster y 'nombre' o algún ID común
+valencia_geo <- left_join(barrios, barrios_info, by = c("nombre" = "barrio"))
+
+# Asegúrate de que cluster es un factor o numérico
+valencia_geo$cluster <- as.factor(valencia_geo$cluster)
+```
+
+
+```{r}
+
+# Definir colores para 4 clusters
+pal <- colorFactor(c("red", "blue", "green", "orange"), domain = levels(valencia_geo$cluster))
+
+# Crear el mapa
+leaflet(data = valencia_geo) %>%
+  addTiles() %>%
+  addPolygons(
+    fillColor = ~pal(cluster),
+    weight = 1,
+    opacity = 1,
+    color = "white",
+    dashArray = "3",
+    fillOpacity = 0.7,
+    popup = ~paste("Barrio:", nombre, "<br>Cluster:", cluster)
+  ) %>%
+  addLegend(
+    position = "bottomright",
+    pal = pal,
+    values = ~cluster,
+    title = "Clusters",
+    opacity = 1
+  )
+
+```
+
+
 
 
