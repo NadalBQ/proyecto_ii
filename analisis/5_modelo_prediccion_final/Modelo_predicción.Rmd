@@ -26,11 +26,11 @@ library(kableExtra)
 
 ```{r Carga de datos y unión de datasets}
 # Cargar datos fiabilidad y pisos
-pisos <- read_csv('pisos_con_analisis_fiabilidad.csv', show_col_types = FALSE) %>%
+pisos_fiabilidad <- read_csv('pisos_con_analisis_fiabilidad.csv', show_col_types = FALSE) %>%
   rename(barrio = neighbourhood_cleansed) %>%
   rename(precio_ponderado_vivienda = precio_ponderado)
 
-pisos1 <- read_csv('pisos_limpios.csv', show_col_types = FALSE)
+pisos <- read_csv('pisos_limpios.csv', show_col_types = FALSE)
 
   #Cargar datos reseñas
 reseñas <- read_csv("clustersResenas.csv", show_col_types = FALSE) %>%
@@ -50,7 +50,7 @@ cluster4 <- read_csv("cluster4.csv", show_col_types = FALSE) %>% mutate(cluster 
 clusters <- bind_rows(cluster1, cluster2, cluster3, cluster4)
 
 # Unir con los datos de pisos
-datos_modelo <- pisos %>%
+datos_modelo <- pisos_fiabilidad %>%
   left_join(clusters, by = "barrio")
 
 datos_modelo <- datos_modelo %>%
