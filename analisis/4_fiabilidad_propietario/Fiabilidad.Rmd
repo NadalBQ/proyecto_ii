@@ -128,10 +128,10 @@ analisis_fiabilidad_general <- function(pisos) {
   cat("Número de barrios únicos:", length(unique(df$neighbourhood_cleansed)), "\n")
   
   cat("\nEstadísticas descriptivas del score de fiabilidad:\n")
-  print(summary(df$score_fiabilidad))
+  print(summary(df$score_fiabilidad_0a5))
   
   cat("\nFiabilidad media global:\n")
-  cat(round(mean(df$score_fiabilidad, na.rm = TRUE), 2), "\n")
+  cat(round(mean(df$score_fiabilidad_0a5, na.rm = TRUE), 2), "\n")
   
   return(df)
 }
