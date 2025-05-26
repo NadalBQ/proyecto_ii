@@ -1,6 +1,6 @@
 ---
-title: "Barrios"
-author: "Toni"
+title: "Análisis de similitud de barrios por servicios"
+author: "María"
 date: "`r Sys.Date()`"
 output: html_document
 ---
@@ -9,49 +9,60 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Objetivo 2
-# LIBRERÍAS
+
+El segundo objetivo consiste en hacer un análisis cluster para agrupar las viviendas por barrios, pero teniendo en cuenta variables del entorno que podrían influir a la hora de alquilar una vivienda en una ciudad (por ejemplo el transporte o la cercanía a algunos lugares).
+
+
+# Carga y preparación de datos
+
+Se importan a continuación todas las librerías utilizadas.
 
 ```{r message=FALSE, warning=FALSE}
 library(knitr)
-library(sf)
-library(dplyr)
-library(geosphere)
-library(leaflet)
-library(tidyr)
-library(ggplot2)
-library(car)
+library(sf)  
+library(dplyr)  
+library(geosphere) 
+library(leaflet) # Crear mapas interactivos (visualización geoespacial).
+library(tidyr) 
+library(ggplot2) 
+library(car)     # Regresión lineal (VIF)
 library(grid)
 library(gridExtra)
-library(pls)
-library(cluster)
-library(FactoMineR)
-library(factoextra)
-library(NbClust)
-library(clValid)
+library(pls)  
+library(ggsci)  
+library(cluster) 
+library(FactoMineR) 
+library(factoextra) 
+library(NbClust) # Determina el número óptimo de clusters usando múltiples índices
+library(clValid) # Valida la calidad de los clusters generados.
 ```
 
-# CARGA Y CREACIÓN DE FICHEROS
+Para continuar con el proyecto, se han obtenido nuevas bases de datos para añadir información sobre los barrios y poder agruparlos en función de cómo afectan estas nuevas variables al precio ponderado obtenido anteriormente.
 
-Para continuar con el proyecto se han obtenido nuevas bases de datos para añadir información sobre los barrios y poder agrupar los barrios en función de como afectan estas nuevas variables al precio ponderado obtenido anteriormente.
+Se han obtenido 3 nuevos datasets:
 
-Se han obtenido 3 nuevos datasets, uno de transporte público por barrio, obtenido de la página del ayuntamiento, otro de renta media obtenido en la página del INE y otro de distancias a lugares de interés que se ha obtenido calculando las distancias a partir del fichero geojson de valencia y las coordenadas de cada lugar.
+- Transporte público por barrio, obtenido de la página del ayuntamiento.
 
-Primero se procederá a leer los archivos de pisos del estudio anterior y transporte:
+- Renta media, obtenido en la página del INE.
+
+- Distancias a lugares de interés, que se ha obtenido calculando las distancias a partir del fichero geojson de valencia y las coordenadas de cada lugar.
+
+Primero se procederá a leer los archivos de pisos del estudio anterior y el fichero de transporte:
+
 ```{r pisos y transporte}
 pisos = read.csv('pisos_limpios.csv', sep =',')  # Resultado del objetivo 1
 transporte = read.csv('transporte.csv', sep = ';') # Sacado de la pagina del ayuntamiento
 ```
 
-A continuación se va a calcular los centroides de cada barrio a partir del geojson para así poder calcular la distancia exacta del centro del barrio al lugar de interés:
+A continuación, se van a calcular los centroides de cada barrio a partir del geojson para así poder calcular la distancia exacta del centro del barrio al lugar de interés:
 
 ```{r centroides barrios}
+
 # Cargar el geojson
 barrios <- st_read("valencia.geojson")
 
 # Obtener centroides de los polígonos (barrios) y extraer sus coordenadas
-#Coge el centro de cada barrio para poder calcular las distancias
-barrios_centroides <- barrios %>% 
+barrios_centroides <- barrios %>%  
   mutate(centroide = st_centroid(geometry)) %>%
   mutate(lon = st_coordinates(centroide)[,1], # Extrae longitud
          lat = st_coordinates(centroide)[,2]) # Extrae latitud
@@ -60,7 +71,7 @@ barrios_centroides <- barrios %>%
 Ahora se crea un nuevo fichero con los puntos clave que se han elegido para el estudio:
 
 ```{r lugares de interés}
-# Lista de puntos clave con nombre, latitud y longitud
+
 puntos_clave <- data.frame(
   nombre = c("Plaza_Ayuntamiento", "CAC", "Bioparc", "Estacion_Norte", 
              "Playa_Malvarrosa", "Torres_Serranos", "Universitat", 
@@ -81,15 +92,14 @@ Para comprobar que las coordenadas son correctas se muestran en un mapa:
 # Convierte el data frame a un objeto espacial (sf), usando lon/lat como coordenadas
 lugares_sf <- st_as_sf(puntos_clave, coords = c("lon", "lat"), crs = 4326)
 
-# Crear mapa 
 leaflet() %>%
-  addProviderTiles("CartoDB.Positron") %>% # Fondo de mapa claro (estilo Positron)
+  addProviderTiles("CartoDB.Positron") %>% 
   addPolygons(data = barrios, 
-              color = "#444444", # color borde barrios
-              weight = 1,        # Grosor del borde
-              fillOpacity = 0.3, # opacidad del relleno
+              color = "#444444",
+              weight = 1,        
+              fillOpacity = 0.3, 
               label = ~as.character(nombre),  # nombre barrios
-              highlightOptions = highlightOptions(weight = 2, color = "blue", fillOpacity = 0.5)) %>% # opciones al pasar el raton
+              highlightOptions = highlightOptions(weight = 2, color = "blue", fillOpacity = 0.5)) %>% 
   addCircleMarkers(data = lugares_sf, 
                    radius = 6, 
                    color = "red", 
@@ -99,21 +109,21 @@ leaflet() %>%
 
 ```
 
-Efectivamente cada lugar se muestra donde corresponde por lo que se puede continuar con el estudio.
+Efectivamente, cada lugar se muestra donde corresponde, por lo que se puede continuar con el estudio.
   
-Finalmente se calculan las distancias en km para cada barrio a cada punto de interés mediante la función distHaversine y se crea el nuevo dataset de distancias:
+Finalmente, se calculan las distancias en kilómetros entre cada barrio y cada punto de interés mediante el uso de la función distHaversine. Se crea el nuevo dataset de distancias:
 
 ```{r distancias}
+
 # Función para calcular distancia entre dos coordenadas
 calcular_distancias <- function(lat_barrio, lon_barrio, puntos) {
   distHaversine(matrix(c(lon_barrio, lat_barrio), ncol = 2), 
                 matrix(c(puntos$lon, puntos$lat), ncol = 2)) / 1000  # en km
 }
 
-# Añadir distancias al dataframe de barrios
 distancias <- barrios_centroides %>%
-  rowwise() %>%  # Aplica operaciones fila por fila (por barrio)
-  mutate(across(c(lat, lon), as.numeric)) %>% #Asegura que sea numerico
+  rowwise() %>%  
+  mutate(across(c(lat, lon), as.numeric)) %>% 
   mutate(
     distancia_P_Ayuntamiento = calcular_distancias(lat, lon, puntos_clave[1,]),
     distancia_CAC           = calcular_distancias(lat, lon, puntos_clave[2,]),
@@ -131,14 +141,14 @@ distancias <- barrios_centroides %>%
   ungroup()
 ```
 
-Como en el fichero hay variables no deseadas del geojson se filtra para que sea más cómodo de usar:
+Como en el fichero hay variables no deseadas del geojson, se filtra para que sea más cómodo de usar:
 
 ```{r filtrar distancias}
 distancias_filtrado = distancias %>% select(nombre, distancia_P_Ayuntamiento:last_col())
 ```
 
 ```{r distancias final}
-# Elimina la columna de geometría espacial (spatial data) del dataframe, quedando solo los datos tabulares (sin coordenadas ni objetos espaciales)
+# Se elimina la columna de geometría espacial 
 distancias_f <- st_drop_geometry(distancias_filtrado)
 ```
 
@@ -149,13 +159,13 @@ renta_media = read.csv("ineValenciafinal.csv", sep =";")
 head(renta_media)
 ```
 
-# DATASET BARRIOS
+# Dataset barrios
 
-En este apartado se procede a la creación del dataset final de barrios, primero se va a juntar la información del dataset pisos con el de distancias, para ello, como se va a juntar por barrio, se comprueba si algún barrio presente en pisos no se encuentra en distancias:
+En este apartado se procede a la creación del dataset final de los barrios. 
+Primero se va a juntar la información del dataset de los pisos con el de las distancias. Para ello, como se va a concatenar ambos conjuntos de datos por el nombre del barrio, se comprueba si algún barrio presente en pisos no se encuentra en distancias:
 
 ```{r dif pisos y distancias}
-setdiff(unique(pisos$neighbourhood_cleansed), unique(distancias_f$nombre)
-)
+setdiff(unique(pisos$neighbourhood_cleansed), unique(distancias_f$nombre))
 ```
 
 Se muestra el barrio Mont-Olivet, vamos a ver si realmente no se encuentra en distancias:
@@ -166,16 +176,15 @@ unique(distancias_f$nombre)
 
 Se puede observar que si se encuentra en el fichero, solo que en el de pisos es MONT-OLIVET y en el de distancias es MONTOLIVET, por lo que se le añade el guión:
 
-```{r cambio de nombre}
+```{r renombrar}
 distancias_f$nombre[distancias_f$nombre == "MONTOLIVET"] <- "MONT-OLIVET"
 ```
 
-Ahora sí se pueden juntar ambos ficheros, pero antes creamos el fichero barrios_info con la variable barrio y la media de la variable precio_ponderado por cada barrio. Como la variable precio_ponderado daba problemas al estar indicada como carácter, se convierte en numérica y así poder calcular la media:
+Ahora sí se pueden juntar ambos ficheros. 
 
-Como cada vivienda tiene un barrio hay que hacer la media de todos los precios en cada barrio
-Se calcula el precio promedio ponderado por barrio y grupo para obtener una medida representativa del valor típico del precio en cada zona específica.
+Antes, se crea el fichero barrios_info con la variable del nombre del barrio y la media de la variable precio_ponderado por cada barrio. Como la variable precio_ponderado daba problemas al estar indicada como carácter, se convierte en numérica para así poder calcular la media.
 
-```{r precio ponderado barrios}
+```{r precio ponderado barrios,  warning=FALSE}
 pisos$precio_ponderado <- gsub(",", ".", pisos$precio_ponderado) # cambiar coma decimal por punto
 pisos$precio_ponderado <- as.numeric(pisos$precio_ponderado) # convertir a numérico
 
@@ -187,14 +196,14 @@ barrios_info <- pisos %>%
   arrange(desc(media))  # Ordena los resultados de mayor a menor precio promedio
 ```
 
-A continuación le añadimos las distancias:
+A continuación, se añaden las distancias:
 
 ```{r join barriosxdistancias}
 barrios_info <- barrios_info %>%
   left_join(distancias_f, by = c("neighbourhood_cleansed" = "nombre"))
 ```
 
-Se realiza el mismo procedimiento con el fichero transporte, se comprueba si algún barrio no está presente en transportes:
+Se realiza el mismo procedimiento con el fichero transporte, comprobando si algún barrio no está presente en transportes:
 
 ```{r dif barrios transporte}
 setdiff(unique(barrios_info$neighbourhood_cleansed), unique(transporte$nombre))
@@ -222,9 +231,9 @@ barrios_info <- barrios_info %>%
   left_join(transporte_resumen, by = c("neighbourhood_cleansed" = "nombre"))
 ```
 
-Por último se va a proceder a juntar el fichero de renta_media, como en este los nombres de barrios no coinciden con el fichero de barrios hay que juntarlo de otra forma. Con el fichero de transporte se han unido las variables codbarrio y coddistrit, también presentes en renta_media, para ver si coinciden se comprueba si algún par (distrito, barrio) en renta_media no está presente en barrio_info:
+Por último, se añade el fichero renta_media. Como los nombres de los barrios no coinciden con los de barrios_info, no se puede unir por nombre. En su lugar, se usan los códigos codbarrio y coddistrit, también presentes en el fichero de transporte. Se comprueba si todos los pares (distrito, barrio) de renta_media están en barrios_info antes de unirlos.
 
-```{r pares únicos}
+```{r pares únicos,  warning=FALSE}
 # Pares únicos en barrios_info
 pares_barrios_info <- barrios_info %>%
   select(coddistrit, codbarrio) %>%
@@ -243,9 +252,9 @@ diferencias <- anti_join(pares_barrios_info, pares_renta_media,
 head(diferencias)
 ```
 
-Como no hay ninguna diferencia se pueden juntar sin problema ambas bases de datos con las variables de renta_media que se desean:
+Como no hay ninguna diferencia, se pueden juntar sin problema ambas bases de datos con las variables de renta_media que se desean:
 
-```{r join barriosxrenta}
+```{r join barriosxrenta,  warning=FALSE}
 renta_media_seleccion <- renta_media %>%
   group_by(Codigo_Distrito, Codigo_Barrio) %>%
   summarise(
@@ -259,9 +268,9 @@ barrios_info <- barrios_info %>%
 
 ```
 
-Finalmente se cambian los nombres del fichero por otros más orientativos:
+Finalmente, se cambian los nombres del fichero por otros más orientativos:
 
-```{r cambio nombres}
+```{r renombrarVar}
 barrios_info <- barrios_info %>%
   rename(
     distrito = neighbourhood_group_cleansed,
@@ -274,12 +283,11 @@ barrios_info <- barrios_info %>%
 head(barrios_info)
 ```
 
+Ahora, una vez se tiene el fichero limpio y con las variables que se desean, se puede continuar con el estudio de agrupamiento de barrios.
 
-Ahora ya se puede continuar con el estudio de agrupamiento de barrios.
+# Influencia de las nuevas variables en el precio ponderado 
 
-# INFLUENCIA DE LAS NUEVAS VARIABLES EN EL PRECIO PONDERADO
-
-Escalamos los datos para interpretar 
+Para comenzar, se escalan los datos para que se puedan interpretar.
 
 ```{r escalar}
 # Escalar las variables numéricas
@@ -288,12 +296,12 @@ barrios_scaled <- as.data.frame(barrios_scaled)
 
 ```
 
-
+Para determinar qué variables influían en el precio, se optó por realizar una regresión lineal
 ```{r modelo lineal}
 modelo <- lm(precio ~ distancia_P_Ayuntamiento + distancia_CAC + distancia_Bioparc + distancia_Estacion + distancia_Malvarrosa + distancia_Torres + distancia_UV + distancia_Puerto + distancia_Albufera + distancia_Viveros + distancia_UPV + distancia_Mestalla + emt + metrovlc + renta_hogar , data = barrios_scaled)
 summary(modelo)
 ```
-El modelo no sale como pensamos. Pensamos que la distancia a la Plaza Ayuntamiento sería importante para los turistas y aquí no la es. Vamos a investigar porque los datos no ajustan bien a la regresión, empezando ver las distribuciones de las variables. 
+El modelo no sale como se esperaba. Por ejemplo, la distancia a la Plaza Ayuntamiento sería importante para los turistas y aquí no la es. Además, el error residual es muy alto (0.84) y la r^2 es algo baja (0.45). Se va a investigar por qué los datos no ajustan bien a la regresión, empezando por ver las distribuciones de las variables. 
 
 ```{r distribuciones var}
 
@@ -313,9 +321,9 @@ ggplot(barrios_scaled_dist, aes(x = value)) +
 
 ```
 
-Muchas variables no siguen una distribución normal. Transformamos el data usando el logaritmo para ver si podemos acercar más a una distribución normal.
+Como muchas variables no siguen una distribución normal, se transforman los datos usando el logaritmo para ver si se pueden ajustar más a una distribución normal.
 
-```{r transformar log}
+```{r transformar log,  warning=FALSE}
 barrios_log <- barrios_scaled %>%
   filter(across(
     c(precio, distancia_P_Ayuntamiento, distancia_CAC, distancia_Bioparc, distancia_Estacion,
@@ -351,30 +359,31 @@ ggplot(barrios_scaled_long_log, aes(x = value)) +
   labs(title = "Distributions of Variables", x = "", y = "Count")
 ```
 
-Vemos que el modelo es mucho peor que el anterior. Veando las distribuciones tampoco siguen una distribución normal. 
+Se observa que el modelo es mucho peor que el anterior, solo hay una única variable significativa, aunque el error haya bajado y la r^2 sea mayor. Viendo también las distribuciones, se nota que tampoco siguen una distribución normal. 
 
-Vamos a ver si los residuos son normales. 
+Se va a ver si los residuos son normales. 
 
 ```{r residuos}
 plot(modelo$fitted.values, resid(modelo))
 ```
 
-Tiene una forma de nube entonces los residuos siguen una distribución normal y el problema no es este.
-Comprobamos si hay multicolinealidad o no.
+Como tiene una forma de nube, los residuos siguen una distribución normal y el problema no es este.
+A continuación se comprueba si hay multicolinealidad o no mediante una matriz de correlaciones.
 
 ```{r correlaciones}
 cor_matrix <- cor(barrios_scaled)
 cor_matrix
 ```
 
-El problema es este. Hay muchas variables muy correlacionadas entre sí que está afectando el modelo. Vamos a ver el factor de inflación de la varianza (VIF). Si hay números más de 10, tenemos un grave problema. 
+El problema es este. Hay muchas variables muy correlacionadas entre sí que está afectando el modelo. Se va a ver el factor de inflación de la varianza (VIF). Si el VIF para las variables es mayor a 10, significa que el problema es grave. 
 
 ```{r vif}
 vif(modelo)
 ```
 
-## PCA
-Decidimos hacer un PCA 
+# PCA
+
+Se decidió hacer un PCA para reducir la dimensionalidad.
 ```{r pca}
 barrios_scaled_sinprecio <- subset(barrios_scaled, select = -c(precio))
 res.pca = PCA(barrios_scaled_sinprecio, scale.unit = FALSE, graph = FALSE, ncp = 10)
@@ -386,8 +395,12 @@ kable(eig.val[1:6,])
 K = 3
 res.pca = PCA(barrios_scaled_sinprecio, scale.unit = FALSE, graph = FALSE, ncp = K)
 ```
+Se observa que es la primera componente principal la que explica más de la mitad de la varianza.Se optó por elegir 3 componentes principales, puesto que son las que superan la línea roja.
+
+Seguidamente se tratarán los aípicos mediante el T2 de Hotteling.
 
 ```{r pca atipicos}
+
 # Gráfico T2 Hotelling
 misScores = res.pca$ind$coord[,1:K]
 miT2 = colSums(t(misScores**2)/eig.val[1:K,1])
@@ -401,6 +414,9 @@ abline(h = F99, col = "red3", lty = 2, lwd = 2)
 anomalas = which(miT2 > F95)
 anomalas
 ```
+Si es verdad que hay algunos valores que se encuentran por encima de la línea roja y que se considerarían atípicos. Se dejarán en el estudio y se proseguirá con el análisis.
+
+Se realiza un gráfico de individuos, coloreados por si son o no valores atípicos según el T2 de Hotelling.
 
 ```{r individuos}
 p1 = fviz_pca_ind(res.pca, axes = c(1,2), geom = c("point"),
@@ -414,7 +430,9 @@ p2 = fviz_pca_ind(res.pca, axes = c(1,3), geom = c("point"),
 
 grid.arrange(p1,p2, nrow = 1)
 ```
+Los resultados para la dimensión 1 con la 2 y la 1 con la 3 son bastantes similares. Se observa que los puntos que están en rojo (los no atípicos) se encuentran más unidos y cercanos, mientras que los azules están más alejados (tiene sentido, ya que son valores más anómalos).
 
+Se prosigue visualizando las variables.
 
 ```{r variables}
 fviz_pca_var(res.pca, axes = c(1,2), repel = TRUE, col.var = "contrib",
@@ -422,11 +440,29 @@ fviz_pca_var(res.pca, axes = c(1,2), repel = TRUE, col.var = "contrib",
 fviz_pca_var(res.pca, axes = c(1,3), repel = TRUE, col.var = "contrib",
              gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"))
 ```
+Se observa claramente que las variables que contribuyen más a la dimensión 1 son las variables de distancia, mientras que las que contribuyen más a la dimensión 3 son las de transporte (metrovlc y emt).
+
+Para verlo de manera más clara, se va a visualizar las contribuciones de las variables para cada componente principal.
 
 ```{r contribucion pca1}
 fviz_contrib(res.pca, choice = "var", axes = 1)
 ```
-Queremos predecir el valor de una var a partir de otras y hay multicolinealidad es mejor usar el pls. 
+Componente 1: Distancias
+
+```{r contribucion pca2}
+fviz_contrib(res.pca, choice = "var", axes = 2)
+```
+Componente 2: Distancias
+
+```{r contribucion pca3}
+fviz_contrib(res.pca, choice = "var", axes = 3)
+```
+Componente 3: Transporte
+
+
+Realmente lo que se quiere es predecir el valor de una variable (el precio) a partir de otras. Además, como hay multicolinealidad, es mejor hacer un análisis PLS, puesto que el PCA no usa la variable dependiente (precio).
+
+Usamos PLS porque queremos predecir una variable dependiente a partir de varias independientes que presentan multicolinealidad y porque reduce la dimensionalidad y extrae componentes latentes que explican la mayor covarianza entre X e Y, mejorando la estabilidad y precisión del modelo.
 
 # PLS
 
@@ -440,16 +476,24 @@ y <- barrios_scaled$precio
 pls_model <- plsr(y ~ ., data = X, scale = FALSE, validation = "CV")
 summary(pls_model)
 ```
+El modelo PLS logra capturar el 100% de la varianza de las variables independientes (X) con 15 componentes, pero solo explica un máximo del 45.3% de la varianza de la variable dependiente (Y). La validación cruzada indica que el error de predicción (RMSEP) es más bajo con 2 o 3 componentes, y luego comienza a aumentar, lo que sugiere sobreajuste al incluir demasiados componentes. Por lo tanto, un modelo con 2 o 3 componentes es el más adecuado, ya que ofrece el mejor equilibrio entre precisión y simplicidad.
 
-```{r validacion}
+Esto también se puede verificar en el siguiente gráfico:
+
+```{r validacionpls}
 validationplot(pls_model, val.type = "MSEP")
 ```
 
+El error empieza bajo, luego aumenta y disminuye de nuevo: con 2 o 3 componentes el error de predicción es bastante bajo.
 
 ```{r pls loadings}
-loadings <- pls_model$loading.weights[, 1:3]  # weights for first 3 components
+loadings <- pls_model$loading.weights[, 1:3]  
 print(loadings)
 ```
+Primera componente: Distancias
+Segunda componente:renta y transporte
+
+Seguidamente se calcula el VIP para 3 componentes, que es para seleccionar las variables mas relevantes para el modelo.
 
 ```{r vip componente 1}
 VIP_single_component <- function(pls_model, component_number) {
@@ -489,30 +533,31 @@ vip_df %>%
   filter(comp1 > 1 | comp2 > 1 | comp3 > 1) %>%
   arrange(desc(comp1 + comp2 + comp3))
 ```
+En la primera componente, las variables más importantes vuelven a ser las de las distancias. Por otra parte, en la segunda componente, son la renta_media y las variables de transporte las que toman protagonismo. En cuanto a la tercera componente, solo la emt y ciertas distancias son las importantes.
 
+Finalmente se escogen dos únicas componentes. Se puede ver en la primera componente que las distancias no significativas segun el VIF son distancia_Puerto, distancia_Estacion, distancia_CAC, distancia_Bioparc (variables que no se tienen en cuenta a la hora del clustering). Además, tampoco son significativas las variables de transporte y renta, pero sí que lo son en la segunda componente (por tanto, estas variables no se quitan). 
 
-Quedamos las variables:
+# Agrupaciones de barrios (clusterización)
 
+Por último, se va a realizar un clustering para agrupar las viviendas por barrios, teniendo en cuenta las nuevas características añadidas.
 
-
-## Agrupaciones de barrios (clusterización)
-
-```{r}
-# Nombres de las columnas que quieres escalar
+```{r clusteringdf}
 col <- setdiff(names(barrios_info), c("distrito","barrio"))
 
-# Escalas esas columnas y las reemplazas en el dataframe original
+# Se escalan todas las variables nuéricas
 barrios_info[col]<- scale(barrios_info[col])
 barrios_info
 ```
+Para poder realizar los clusters, se pondera cada variable según su importancia en el modelo PLS, es decir, se multiplica cada variable por su coeficiente.
 
-
-
+Además, se suman estas variables ponderadas para obtener un precio estimado. Finalmente, se combina este valor estimado con el precio promedio del barrio, generando un índice más completo.
 
 ```{r precio_pond_barrio}
-coef <- coef(pls_model, ncomp=2)
 
-barrios_significativas <- subset(barrios_scaled, select = -c(distancia_Puerto, distancia_Estacion, distancia_CAC, distancia_Bioparc, precio))
+coef <- coef(pls_model, ncomp=2) # Extrae los coeficientes del modelo PLS para los primeros 2 componentes.
+
+# Se eliminan las variables que no son significativas según el PLS
+barrios_significativas <- subset(barrios_scaled, select = -c(distancia_Puerto, distancia_Estacion, distancia_CAC, distancia_Bioparc, precio)) 
 
 ponderado_barrio <- sweep(barrios_significativas, 2, coef, `*`)
 ponderado_barrio$precio_barrio <- rowSums(ponderado_barrio)
@@ -520,17 +565,21 @@ ponderado_barrio$precio_barrio <- rowSums(ponderado_barrio)
 barrios_info$precio_barrio <- (ponderado_barrio$precio_barrio + barrios_info$precio)
 barrios_info
 ```
+Comenzando con el clustering, se usa la distancia euclídea porque no se busca agrupar viviendas por perfil urbano o ubicación, sino por similitud en las variables cuantitativas (como precio, tamaño, distancia a puntos clave, etc.). La distancia euclídea mide justamente la cercanía numérica entre observaciones, sin importar su contexto geográfico.
 
-
-```{r}
+```{r matriz distancias}
 precio_barrio_df <- as.data.frame(barrios_info$precio_barrio)
 midist <- get_dist(precio_barrio_df, stand = FALSE, method = "euclidean")
 fviz_dist(midist, show_labels = TRUE, lab_size = 0.3,
           gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
 ```
 
-## Método de Ward
-```{r warning=FALSE}
+# Método de Ward
+
+El método de Ward es un método jerárquico que busca minimizar la variabilidad interna dentro de cada grupo.
+En nuestro caso, se combinará el análisis del coeficiente de Silhouette con la variabilidad intra-cluster. El coeficiente de Silhouette mide qué tan bien separado está cada punto dentro de su cluster comparado con otros clusters.
+
+```{r Ward, warning=FALSE}
 p1 = fviz_nbclust(x = precio_barrio_df, FUNcluster = hcut, method = "silhouette", 
                   hc_method = "ward.D2", k.max = 10, verbose = FALSE, 
                   hc_metric = "euclidean") + labs(title = "Num. optimo clusters")
@@ -539,15 +588,20 @@ p2 = fviz_nbclust(x = precio_barrio_df, FUNcluster = hcut, method = "wss",
                   hc_metric = "euclidean") + labs(title = "Num. optimo clusters")
 grid.arrange(p1, p2, nrow = 1)
 ```
+Aunque en el gráfico de la izquierda el coeficiente de silhouette indique que el número de clusters óptimo es 2, si se observa el gráfico de la derecha se ve que para este número la suma de cuadrados aún es demasiado alta. Por tanto, se escogerán 4 clusters, ya que son los óptimos por el método del codo.
 
-```{r}
+Los grupos son:
+```{r clust1}
 clust1 <- hclust(midist, method="ward.D2")
 grupos1 <- cutree(clust1, k=4)
 table(grupos1)
 ```
 
-## Método de la media
-```{r warning=FALSE}
+# Método de la media
+
+El método de la media en un clustering jerárquico define la distancia entre dos clústeres como la media de las distancias entre todas las parejas de elementos que los componen.
+
+```{r media, warning=FALSE}
 p1 = fviz_nbclust(x = precio_barrio_df, FUNcluster = hcut, method = "silhouette", 
                   hc_method = "average", k.max = 10, verbose = FALSE, 
                   hc_metric = "euclidean") + labs(title = "Num. optimo clusters")
@@ -556,14 +610,20 @@ p2 = fviz_nbclust(x = precio_barrio_df, FUNcluster = hcut, method = "wss",
                   hc_metric = "euclidean") + labs(title = "Num. optimo clusters")
 grid.arrange(p1, p2, nrow = 1)
 ```
-```{r}
+Para este método se han escogido 5 clusters como número óptimo, pues es el segundo coeficiente más alto de silhouette y la variabilidad intra cluster es bastante más baja que con 2.
+
+Los grupos son:
+```{r clust2}
 clust2 <- hclust(midist, method="average")
 grupos2 = cutree(clust2, k = 5)
 table(grupos2)
 ```
 
 ## K-medias
-```{r}
+
+El algoritmo k-means es un método no jerárquico de agrupamiento que busca dividir un conjunto de datos en k grupos o clusters minimizando la variación dentro de cada grupo.
+
+```{r Kmedias}
 p1 = fviz_nbclust(x = precio_barrio_df, FUNcluster = kmeans, method = "silhouette", 
              k.max = 10, verbose = FALSE) +
   labs(title = "K-means")
@@ -572,14 +632,19 @@ p2 = fviz_nbclust(x = precio_barrio_df, FUNcluster = kmeans, method = "wss",
   labs(title = "K-means")
 grid.arrange(p1, p2, nrow = 1)
 ```
+En el gráfico de la izquierda se ven coeficientes de silhouette similares para valores a partir del 2. Se escogen 4 clusters porque la suma de cuadrados ya es lo suficientemente baja.
 
-```{r}
+Los grupos son los siguentes:
+```{r clust3}
 set.seed(100)
 clust3 <- kmeans(precio_barrio_df, centers = 4, nstart = 20)
 table(clust3$cluster)
 ```
 ## K-medoides
-```{r}
+
+El algoritmo k-medoides es otro método no jerárquico que agrupa datos seleccionando como centro de cada cluster un medoide, que es un punto real cuyo total de distancias a los demás puntos del cluster es mínimo.
+
+```{r Kmedoides}
 p1 = fviz_nbclust(x = precio_barrio_df, FUNcluster = pam, method = "silhouette", 
              k.max = 10, verbose = FALSE) +
   labs(title = "Numero optimo de clusters")
@@ -588,15 +653,18 @@ p2 = fviz_nbclust(x = precio_barrio_df, FUNcluster = pam, method = "wss",
   labs(title = "Numero optimo de clusters")
 grid.arrange(p1, p2, nrow = 1)
 ```
+Para k-medoides el número de clusters óptimo también es 4, porque es donde se produce el codo en el gráfico de la derecha y el coeficielte de silhouette se mantiene alto.
 
-```{r}
+Los grupos son los siguientes:
+```{r clust4}
 clust4 <- pam(precio_barrio_df, k = 4)
 table(clust4$clustering)
 ```
-## Validación
+# Validación del clustering
 
-```{r}
-library(ggsci)
+Para elegir el método de clustering más adecuado, es fundamental evaluar la calidad de los grupos generados y validar los resultados obtenidos. Por ello, se comparan las técnicas Ward, k-medias y k-medoides, utilizando el índice de silhouette como criterio de validación. El índice de silhouette mide qué tan bien se ajusta cada punto a su cluster asignado en comparación con otros clusters, proporcionando una métrica clara para evaluar la cohesión y separación de los grupos.
+1- mejor asignación
+```{r validacion}
 colores = pal_npg("nrc")(6)
 colores2 = pal_npg("nrc")(7)
 par(mfrow = c(1,3))
@@ -604,9 +672,14 @@ plot(silhouette(grupos1, midist), col=colores, border=NA, main = "WARD")
 plot(silhouette(clust3$cluster, midist), col=colores, border=NA, main = "K-MEDIAS")
 plot(silhouette(clust4$clustering, midist), col=colores2, border=NA, main = "K-MEDOIDES")
 ```
+El análisis muestra diferencias pero no tan claras en la calidad de los clusters obtenidos. Valores cercanos a 1 del coeficiente de silhouette indican buena cohesión y separación.
+
+En ningún método el coeficiente de clustering es negativo, por lo que los tres modelos hacen bien la agrupación de clusters.
+
+Para salir de dudas, se probará la validación con la función clValid, probando tres métodos diferentes: jerárquico (ward), k-medias y PAM (k-medoides). Se evaluaron agrupaciones con 4 y 5 clusters utilizando la distancia euclídea y validación interna para comparar la calidad de los clusters. Finalmente, se examinó un resumen de los resultados para determinar la mejor opción.
 
 
-```{r}
+```{r val}
 metodos = c("ward","kmeans","pam")
 validacion = suppressMessages(clValid(precio_barrio_df, nClust = 4:5, metric = "euclidean", 
                       clMethods = metodos, 
@@ -614,14 +687,13 @@ validacion = suppressMessages(clValid(precio_barrio_df, nClust = 4:5, metric = "
                       method = "ward"))
 summary(validacion)
 ```
+En resumen, K-Medias ofrece la mejor estructura de clusters para este conjunto de datos, con mayor cohesión y separación, mientras que Ward y K-Medoides presentan agrupamientos menos claros y posibles problemas en la asignación de puntos. Por tanto, el número de clusters óptimo escogido es 4.
 
+# Separación por cluster
 
-Los clusters del tercero tienen menor precio ponderado
+Para facilitar el analisis de los objetivos 3 y 4 siguientes, se separarán los clusters y se creará un fichero .csv con cada uno de ellos.
 
-## Separación por cluster 
-Para facilitar el analisis del obj 3,4 siguiente
-
-```{r}
+```{r clustcsv}
 barrios_info$cluster <- clust3$cluster
 cluster1 <- subset(barrios_info, cluster == 1)
 cluster2 <- subset(barrios_info, cluster == 2)
@@ -636,20 +708,15 @@ write.csv(cluster4,"cluster4.csv")
 
 ```
 
+Por último, a modo de visualizar como se distribuyen estos clusters en valencia, es decir, como se agrupan los distintos barrios de la ciudad, se ha realizado un mapa interactivo, donde se le asocia un color a cada cluster.
+s
+```{r mapa clust}
 
-```{r}
-
-
-# Unir los clusters (si están en un objeto separado)
-# Suponiendo que 'barrios_info' contiene el cluster y 'nombre' o algún ID común
+# Unir los clusters 
 valencia_geo <- left_join(barrios, barrios_info, by = c("nombre" = "barrio"))
 
-# Asegúrate de que cluster es un factor o numérico
+# Asegura de que cluster es un factor o numérico
 valencia_geo$cluster <- as.factor(valencia_geo$cluster)
-```
-
-
-```{r}
 
 # Definir colores para 4 clusters
 pal <- colorFactor(c("red", "blue", "green", "orange"), domain = levels(valencia_geo$cluster))
@@ -675,7 +742,3 @@ leaflet(data = valencia_geo) %>%
   )
 
 ```
-
-
-
-

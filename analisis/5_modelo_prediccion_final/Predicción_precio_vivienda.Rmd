@@ -1,0 +1,546 @@
+---
+title: "Predicción"
+output:
+  html_document:
+    df_print: paged
+  word_document:
+    reference_docx: default.docx
+  pdf_document: default
+date: "2025-05-22"
+always_allow_html: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r librerías}
+library(dplyr) #Manipulación de datos (filtrar, agrupar, mutar, resumir)
+library(readr) #Lectura de archivos CSV/TXT de forma rápida
+library(randomForest) #Algoritmo de aprendizaje basado en árboles (ensemble)
+library(Metrics) #Calcular métricas de evaluación: rmse(), mae()...
+library(ggplot2) #Crear gráficos (puntos, líneas, histogramas, facetas...)
+library(tidyr) #Reformatear datos (pivot_longer, pivot_wider, drop_na)
+library(tibble) #Alternativa moderna a data.frame, más limpia
+library(stringr) #Manipulación de texto (str_extract, str_remove, etc.)
+library(broom) #Extraer resultados limpios de modelos (tidy(), glance())
+library(knitr) #Generar documentos (Rmd → HTML, Word, PDF) y tablas con kable()
+library(kableExtra) #Decorar tablas HTML/Word (kable_styling, colores, alineación)
+library(xgboost) #Modelo de predicción avanzado basado en boosting
+library(purrr) #Aplicar funciones a listas (map(), map_df()) → ideal para loops funcionales
+```
+
+```{r Carga de datos y unión de datasets}
+
+barrios_reseñas <- read_csv('barriosResenas.csv', show_col_types = FALSE) %>%  
+  rename(barrio = neighbourhood_cleansed) %>%
+  rename(puntuacion_media_normal_reseñas = puntuacion_media_normal) %>%
+  rename(puntuacion_media_reseñas = puntuacion_media)
+  
+# Cargar datos fiabilidad y pisos
+pisos_fiabilidad <- read_csv('pisos_con_analisis_fiabilidad.csv', show_col_types = FALSE) %>%
+  rename(barrio = neighbourhood_cleansed) %>%
+  rename(precio_ponderado_vivienda = precio_ponderado)
+
+pisos_limpios <- read_csv('pisos_limpios.csv', show_col_types = FALSE) %>%
+  rename(barrio = neighbourhood_cleansed) 
+
+# Cargar archivo barrios con precios medios
+barrios <- read_csv("barrios_cluster_variables.csv", show_col_types = FALSE) %>%
+  rename(barrio = neighbourhood_cleansed) %>%
+  select(barrio, precio_ponderado_vivienda_media, precio_ponderado_barrio_media)
+
+  #Cargar datos reseñas
+reseñas <- read_csv("clustersResenas.csv", show_col_types = FALSE) %>%
+  rename(cluster_text = 1) %>%
+  rename(puntuacion_media_reseñas_ = puntuacion_media) %>%
+  rename(reseñas_media_normalizada_cluster = puntuacion_media_normal) %>%
+  mutate(cluster = str_extract(cluster_text, "\\d+")) %>%   # Extrae "1", "2", etc.
+  select(-cluster_text)
+  
+# Cargar y añadir cluster a cada uno
+cluster1 <- read_csv("cluster1.csv", show_col_types = FALSE) %>% mutate(cluster = 1)
+cluster2 <- read_csv("cluster2.csv", show_col_types = FALSE) %>% mutate(cluster = 2)
+cluster3 <- read_csv("cluster3.csv", show_col_types = FALSE) %>% mutate(cluster = 3)
+cluster4 <- read_csv("cluster4.csv", show_col_types = FALSE) %>% mutate(cluster = 4)
+
+# Unir todos los clusters
+clusters <- bind_rows(cluster1, cluster2, cluster3, cluster4)
+
+# Unir clusters con pisos
+pisos_cluster <- pisos_limpios %>%
+  left_join(clusters %>% select(barrio, cluster), by = "barrio") %>%
+  mutate(cluster = as.character(cluster))
+
+# Unir reseñas con pisos 
+pisos_reseñas <- pisos_cluster %>%
+  left_join(reseñas, by = "cluster")
+
+# Unir al dataset de viviendas
+pisos_final <- pisos_reseñas %>%
+  left_join(barrios, by = "barrio")
+
+pisos_final <- pisos_final %>% select(-1)
+
+pisos_final <- pisos_final %>%
+  left_join(pisos_fiabilidad %>%
+      select(id, score_fiabilidad, fiabilidad_normalizada, score_fiabilidad_0a5, precio_ponderado_barrio, precio_ponderado_vivienda),
+    by = c("listing_id" = "id")
+  )
+
+# Unir al dataset de viviendas
+pisos_final <- pisos_final %>%
+  left_join(barrios_reseñas, by = "barrio")
+
+pisos_final <- pisos_final %>% select(-1)
+```
+
+```{r Filtrar columnas clave}
+# Filtrar columnas clave y eliminar filas incompletas
+datos_modelo <- pisos_final %>%
+  select(price, # Variable objetivo (precio real)
+    bedrooms, bathrooms, accommodates,     # Variables físicas
+    precio_ponderado_barrio_media, barrio,
+    precio_ponderado_vivienda_media, precio_ponderado_barrio, precio_ponderado_vivienda,
+    fiabilidad_normalizada, reseñas_media_normalizada_cluster, puntuacion_media_normal_reseñas,
+    cluster
+  ) %>%
+  filter(complete.cases(.)) %>%  # Elimina filas con valores faltantes
+  mutate(cluster = as.factor(cluster))  # Convierte a factor para modelos
+
+# Eliminar outliers extremos (5% inferior y 5% superior del precio)
+cuantiles <- quantile(datos_modelo$price, probs = c(0.05, 0.95), na.rm = TRUE)
+
+datos_modelo <- datos_modelo %>%
+  filter(price >= cuantiles[1], price <= cuantiles[2])
+
+```
+
+```{r Conversión precio a log}
+# Añadir log_precio
+datos_modelo <- datos_modelo %>%
+  mutate(log_precio = log(price + 1))
+
+# Dividir en train/test (80/20)
+set.seed(123)
+n <- nrow(datos_modelo)
+train_indices <- sample(1:n, size = 0.8 * n)
+
+train <- datos_modelo[train_indices, ]
+test <- datos_modelo[-train_indices, ]
+
+```
+Se transformó en log para suavizar el impacto de los valores extremos, mejorar la relación lineal entre variables predictoras y el objetivo y facilitar una predicción más precisa en el rango central de precios.
+
+```{r preparación matrices}
+# Eliminar columnas no numéricas y preparar matrices
+x_vars <- c(
+  "bedrooms", "bathrooms", "accommodates", "precio_ponderado_barrio_media",
+  "fiabilidad_normalizada",
+  "puntuacion_media_normal_reseñas")
+
+# PERO mantener cluster y barrio en el dataframe
+train$cluster <- datos_modelo[train_indices, "cluster"]
+test$cluster <- datos_modelo$cluster[-train_indices]
+train$barrio <- datos_modelo[train_indices, "barrio"]
+test$barrio <- datos_modelo[-train_indices, "barrio"]
+
+X_train <- as.matrix(sapply(train[, x_vars], as.numeric))
+X_test <- as.matrix(sapply(test[, x_vars], as.numeric))
+y_train <- train$log_precio
+y_test <- test$log_precio
+
+```
+
+```{r Modelo regresión lineal}
+# Modelo de regresión lineal
+modelo_lm <- lm(log_precio ~ bedrooms + bathrooms + accommodates +
+                  precio_ponderado_vivienda_media + precio_ponderado_barrio_media +
+                  fiabilidad_normalizada +
+                  puntuacion_media_normal_reseñas +
+                  reseñas_media_normalizada_cluster,
+                data = train)
+
+# Predicciones
+pred_log_lm <- predict(modelo_lm, newdata = test)
+pred_lm <- exp(pred_log_lm) - 1
+real <- exp(test$log_precio) - 1
+
+# Evaluación
+data.frame(
+  Modelo = "Regresión Lineal",
+  RMSE = rmse(real, pred_lm),
+  MAE = mae(real, pred_lm),
+  R2 = cor(real, pred_lm)^2
+)
+
+```
+
+```{r Módelo Random Forest}
+# Entrenar random forest
+modelo_rf <- randomForest(
+  formula = log_precio ~ bedrooms + bathrooms + accommodates +
+    precio_ponderado_vivienda_media + precio_ponderado_barrio_media +
+    fiabilidad_normalizada +
+    puntuacion_media_normal_reseñas,
+  data = train,
+  ntree = 500,
+  importance = TRUE
+)
+
+# Predicciones
+pred_log_rf <- predict(modelo_rf, newdata = test)
+pred_rf <- exp(pred_log_rf) - 1
+
+# Evaluación
+data.frame(
+  Modelo = "Random Forest",
+  RMSE = rmse(real, pred_rf),
+  MAE = mae(real, pred_rf),
+  R2 = cor(real, pred_rf)^2
+)
+
+```
+```{r modelo xgboost}
+modelo_xgb <- xgboost(
+  data = X_train,
+  label = y_train,
+  nrounds = 100,
+  max_depth = 4,
+  eta = 0.1,
+  objective = "reg:squarederror",
+  verbose = 0
+)
+
+# Predicción
+pred_log <- predict(modelo_xgb, X_test)
+pred <- exp(pred_log) - 1
+real <- exp(y_test) - 1
+
+# Métricas
+data.frame(
+  RMSE = rmse(real, pred),
+  MAE = mae(real, pred),
+  R2 = cor(real, pred)^2
+)
+
+```
+
+```{r Entrenar y evaluar modelos}
+# Reutilizamos train y test definidos antes
+real <- exp(test$log_precio) - 1
+
+# Modelo lineal
+modelo_lm <- lm(log_precio ~ ., data = train[, c(x_vars, "log_precio")])
+pred_lm <- exp(predict(modelo_lm, newdata = test)) - 1
+
+# Modelo Random Forest
+modelo_rf <- randomForest(
+  formula = log_precio ~ .,
+  data = train[, c(x_vars, "log_precio")],
+  ntree = 500,
+  importance = TRUE
+)
+pred_rf <- exp(predict(modelo_rf, newdata = test)) - 1
+
+# Ya tienes modelo_xgb y pred_xgb = pred
+
+# Guardar resultados
+comparacion_modelos <- bind_rows(
+  tibble(Modelo = "XGBoost", RMSE = rmse(real, pred), MAE = mae(real, pred), R2 = cor(real, pred)^2),
+  tibble(Modelo = "Random Forest", RMSE = rmse(real, pred_rf), MAE = mae(real, pred_rf), R2 = cor(real, pred_rf)^2),
+  tibble(Modelo = "Regresión Lineal", RMSE = rmse(real, pred_lm), MAE = mae(real, pred_lm), R2 = cor(real, pred_lm)^2)
+)
+
+```
+
+```{r Comparación modelos}
+comparacion_modelos %>%
+  kable(digits = 2) %>%
+  kable_styling(full_width = FALSE)
+
+# Normalizar cada métrica a escala 0–1 para comparación visual
+comparacion_norm <- comparacion_modelos %>%
+  mutate(
+    RMSE_norm = (RMSE - min(RMSE)) / (max(RMSE) - min(RMSE)),
+    MAE_norm = (MAE - min(MAE)) / (max(MAE) - min(MAE)),
+    R2_norm = (R2 - min(R2)) / (max(R2) - min(R2))
+  ) %>%
+  select(Modelo, RMSE = RMSE_norm, MAE = MAE_norm, R2 = R2_norm) %>%
+  pivot_longer(cols = c(RMSE, MAE, R2), names_to = "Métrica", values_to = "Valor")
+
+# Gráfico comparativo proporcional
+ggplot(comparacion_norm, aes(x = Modelo, y = Valor, fill = Métrica)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Comparación de modelos (normalizado 0–1)",
+    y = "Valor normalizado (0–1)",
+    x = ""
+  ) +
+  theme_minimal(base_size = 14) +
+  scale_fill_brewer(palette = "Set2")
+
+
+```
+
+XGBoost se comporta como el modelo más completo: explica mejor la variabilidad del precio y mantiene un error razonablemente bajo.
+Random Forest ofrece predicciones algo más conservadoras y precisas en euros, pero con menos poder explicativo.
+La regresión lineal no capta bien las complejidades del precio de vivienda
+
+
+
+```{r Importancia variables en modelo}
+  # Calcular importancia
+  importance_matrix <- xgb.importance(model = modelo_xgb)
+  
+  # Mostrar como tabla
+  importance_matrix %>%
+    kable() %>%
+    kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+  
+  # Gráfico de importancia
+  xgb.plot.importance(importance_matrix, top_n = 10, rel_to_first = TRUE,
+                      xlab = "Importancia relativa")
+  
+```
+
+```{r Precio Real v Predicho}
+# Crear dataframe con resultados
+resultados <- test %>%
+  mutate(
+    precio_real = exp(log_precio) - 1,
+    precio_predicho = pred
+  )
+
+# Gráfico
+ggplot(resultados, aes(x = precio_real, y = precio_predicho)) +
+  geom_point(alpha = 0.4, color = "#1f78b4", size = 2) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(
+    title = "Precio Real vs Precio Predicho",
+    x = "Precio Real (€)",
+    y = "Precio Predicho (€)"
+  ) +
+  theme_minimal(base_size = 14) +
+  annotate("text", x = min(resultados$precio_real), y = max(resultados$precio_predicho),
+           label = paste("R² =", round(cor(resultados$precio_real, resultados$precio_predicho)^2, 3)),
+           hjust = 0, color = "darkgreen")
+
+```
+
+
+```{r Métricas por clúster}
+resultados_clusters <- datos_modelo %>%
+  split(.$cluster) %>%
+  map_df(function(df) {
+    if (nrow(df) < 20) return(NULL)  # evitar errores con clusters pequeños
+    
+    set.seed(123)
+    train_indices <- sample(1:nrow(df), size = 0.8 * nrow(df))
+    train <- df[train_indices, ]
+    test <- df[-train_indices, ]
+    
+    x_vars <- c("bedrooms", "bathrooms", "accommodates",
+                "precio_ponderado_barrio_media",
+                "fiabilidad_normalizada",
+                "puntuacion_media_normal_reseñas")
+    
+    X_train <- as.matrix(sapply(train[, x_vars], as.numeric))
+    X_test <- as.matrix(sapply(test[, x_vars], as.numeric))
+    y_train <- log(train$price + 1)
+    y_test <- log(test$price + 1)
+    
+    modelo <- xgboost(data = X_train, label = y_train, nrounds = 100,
+                      max_depth = 4, eta = 0.1, objective = "reg:squarederror", verbose = 0)
+    
+    pred <- exp(predict(modelo, X_test)) - 1
+    real <- exp(y_test) - 1
+    
+    resultado <- tibble(
+      cluster = unique(df$cluster),
+      RMSE = rmse(real, pred),
+      MAE = mae(real, pred),
+      R2 = cor(real, pred)^2
+    )
+    
+    print(resultado)  # Mostrar resultado por consola
+    return(resultado)
+  })
+
+# Tabla final
+resultados_clusters %>%
+  rename("Cluster" = cluster, "Error Medio (RMSE)" = RMSE,
+         "Error Absoluto (MAE)" = MAE, "Variabilidad Explicada (R²)" = R2) %>%
+  kable() %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+```{r Real v Predicho por clúster}
+# Suponiendo que test ya tiene: precio_real, precio_predicho y cluster
+resultados_cluster <- test %>%
+  mutate(
+    precio_real = exp(log_precio) - 1,
+    precio_predicho = pred
+  )
+
+# Gráfico con facetas por cluster
+ggplot(resultados_cluster, aes(x = precio_real, y = precio_predicho)) +
+  geom_point(alpha = 0.4, color = "#1f78b4", size = 1.5) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  facet_wrap(~cluster) +
+  labs(
+    title = "Precio Real vs Precio Predicho por Cluster",
+    x = "Precio Real (€)",
+    y = "Precio Predicho (€)"
+  ) +
+  theme_minimal(base_size = 14)
+
+```
+
+
+```{r Métricas por Barrios}
+resultados_barrios <- datos_modelo %>%
+  split(.$barrio) %>%
+  map_df(function(df) {
+    if (nrow(df) < 20) return(NULL)  # evitar barrios con pocos datos
+    
+    set.seed(123)
+    train_indices <- sample(1:nrow(df), size = 0.8 * nrow(df))
+    train <- df[train_indices, ]
+    test <- df[-train_indices, ]
+    
+    x_vars <- c("bedrooms", "bathrooms", "accommodates",
+                "precio_ponderado_barrio_media",
+                "fiabilidad_normalizada",
+                "puntuacion_media_normal_reseñas")
+    
+    X_train <- as.matrix(sapply(train[, x_vars], as.numeric))
+    X_test <- as.matrix(sapply(test[, x_vars], as.numeric))
+    y_train <- log(train$price + 1)
+    y_test <- log(test$price + 1)
+    
+    modelo <- xgboost(
+      data = X_train,
+      label = y_train,
+      nrounds = 100,
+      max_depth = 4,
+      eta = 0.1,
+      objective = "reg:squarederror",
+      verbose = 0
+    )
+    
+    pred <- exp(predict(modelo, X_test)) - 1
+    real <- exp(y_test) - 1
+    
+    resultado <- tibble(
+      barrio = unique(df$barrio),
+      RMSE = rmse(real, pred),
+      MAE = mae(real, pred),
+      R2 = cor(real, pred)^2
+    )
+    
+    print(resultado)  # Mostrar resultado por consola
+    return(resultado)
+  })
+
+```
+```{r Tabla Métricas barrios}
+# Tabla final
+resultados_barrios %>%
+  rename("Barrios" = barrio, "Error Medio (RMSE)" = RMSE,
+         "Error Absoluto (MAE)" = MAE, "Variabilidad Explicada (R²)" = R2) %>%
+  kable() %>%
+  kable_styling(full_width = FALSE)
+```
+
+```{r Distribución del error}
+# Calcular error
+resultados <- test %>%
+  mutate(
+    precio_real = exp(log_precio) - 1,
+    precio_predicho = pred,
+    error = precio_predicho - precio_real
+  )
+
+# Histograma
+ggplot(resultados, aes(x = error)) +
+  geom_histogram(fill = "#1f78b4", bins = 30, alpha = 0.7) +
+  geom_vline(xintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Distribución del error (Precio Predicho − Real)",
+       x = "Error (€)", y = "Frecuencia") +
+  theme_minimal()
+
+```
+El histograma muestra una distribución asimétrica a la izquierda, con la mayoría de los errores concentrados entre -50€ y +50€.
+
+```{r Sobreestima o subestima la predicción?}
+mean_abs_error <- mean(abs(resultados$error))
+cat("Error medio absoluto:", round(mean_abs_error, 2), "€")
+
+
+```
+El error medio absoluto es de 22.81 €, lo que indica una leve desviación de la predicción del precio, siendo este un valor aceptable.
+
+```{r Error absoluto según precio real}
+# Scatterplot de error absoluto vs precio real
+ggplot(resultados, aes(x = precio_real, y = abs(error))) +
+  geom_point(alpha = 0.3, color = "#fc8d62") +
+  geom_smooth(method = "loess", se = FALSE, color = "darkred") +
+  labs(title = "Error absoluto según el precio real",
+       x = "Precio real (€)",
+       y = "Error absoluto (€)") +
+  theme_minimal()
+
+```
+El gráfico de dispersión muestra que el error absoluto tiende a aumentar con el precio real:
+
+En viviendas con precio real <100€, el modelo es bastante preciso (errores bajos). En viviendas >150€, los errores se amplifican notablemente.
+
+El modelo predice bien en el rango medio-bajo de precios, pero su rendimiento disminuye conforme el precio aumenta.
+
+
+```{r}
+x_vars <- c(
+  "bedrooms", "bathrooms", "accommodates", "precio_ponderado_barrio_media",
+  "fiabilidad_normalizada", "puntuacion_media_normal_reseñas"
+)
+
+
+predecir_precio_vivienda <- function(bedrooms, bathrooms, accommodates, barrio) {
+  
+  # Validación
+  if (!(barrio %in% barrios$barrio)) {
+    stop("❌ El barrio indicado no existe en los datos.")
+  }
+  
+  # Obtener valores del barrio
+  p_bar <- barrios %>% filter(barrio == !!barrio) %>% pull(precio_ponderado_barrio_media) %>% .[1]
+  reseñas <- barrios_reseñas %>% filter(barrio == !!barrio) %>% pull(puntuacion_media_normal_reseñas) %>% .[1]
+  fiabilidad <- mean(datos_modelo$fiabilidad_normalizada, na.rm = TRUE)
+  
+  # Crear nuevo ejemplo como named vector
+  nueva <- data.frame(
+    bedrooms = bedrooms,
+    bathrooms = bathrooms,
+    accommodates = accommodates,
+    precio_ponderado_barrio_media = p_bar,
+    fiabilidad_normalizada = fiabilidad,
+    puntuacion_media_normal_reseñas = reseñas
+  )
+  
+  # Reordenar columnas según x_vars
+  nueva <- nueva[, x_vars]
+  
+  # Predecir con XGBoost
+  pred_log <- predict(modelo_xgb, newdata = as.matrix(nueva))
+  pred_precio <- exp(pred_log) - 1
+  
+  cat("📍 Precio estimado para nueva vivienda", ":", round(pred_precio, 2), "€\n")
+  return(round(pred_precio, 2))
+}
+
+predecir_precio_vivienda(1,2,4,'LA GRAN VIA')
+
+```
+
