@@ -101,14 +101,24 @@ tablaNA
 ```
 
 
-```{r valores faltantes}
-library(Hmisc)
+```{r valores faltantes, warning=FALSE}
+library(dplyr)
 
-# baños --> imputar con la mediana (1)
-list_limpiado_pisos$bathrooms = impute(list_limpiado_pisos$bathrooms, fun = median)
+# baños --> imputar con la mediana del barrio donde esta
+list_limpiado_pisos <- list_limpiado_pisos %>%
+  group_by(neighbourhood_cleansed) %>%
+  mutate(bathrooms = ifelse(is.na(bathrooms),
+                            median(bathrooms, na.rm = TRUE),
+                            bathrooms)) %>%
+  ungroup()
 
-# habitaciones --> imputar con la mediana (1)
-list_limpiado_pisos$bedrooms <- impute(list_limpiado_pisos$bedrooms, fun = median)
+# habitaciones --> imputar con la mediana del barrio donde esta
+list_limpiado_pisos <- list_limpiado_pisos %>%
+  group_by(neighbourhood_cleansed) %>%
+  mutate(bedrooms = ifelse(is.na(bedrooms),
+                            median(bedrooms, na.rm = TRUE),
+                            bedrooms)) %>%
+  ungroup()
 
 #quitamos las viviendas que no tienen valores de las reseñas
 list_limpiado_pisos <- list_limpiado_pisos[!is.na(list_limpiado_pisos$review_scores_rating), ]
@@ -126,8 +136,6 @@ tablaNA
 ```
 
 ```{r}
-
-library(dplyr)
 
 list_limpiado_pisos %>%
   group_by(neighbourhood_cleansed) %>%
